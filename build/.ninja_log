@@ -1,0 +1,16 @@
+# ninja log v7
+41	5062	8130417289043338	CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.obj	c24d2611f3d501a2
+27	8237	8130417288903320	CMakeFiles/binance_capture.dir/src/binance_capture.cpp.obj	131a055cd2446385
+54	8273	8130417289223403	CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.obj	e07a1b19aeb173f7
+60	448	8130418132494955	order_book_tests.exe	c448ab2563d3cd3c
+48	28127	8130419892440766	CMakeFiles/binance_capture.dir/src/main.cpp.obj	a2b1ed91c926c9e1
+28129	28757	8130420173257756	binance_capture.exe	a5738666a7467f0e
+31	24082	8130421164953956	CMakeFiles/binance_capture.dir/src/main.cpp.obj	a2b1ed91c926c9e1
+69	699	8130421510945854	binance_capture.exe	a5738666a7467f0e
+38	3263	8130422056372984	CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.obj	c24d2611f3d501a2
+51	5289	8130422056493024	CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.obj	e07a1b19aeb173f7
+30	5331	8130422056272974	CMakeFiles/binance_capture.dir/src/binance_capture.cpp.obj	131a055cd2446385
+5290	5676	8130422108866561	order_book_tests.exe	c448ab2563d3cd3c
+5333	5966	8130422109306562	binance_capture.exe	a5738666a7467f0e
+32	26451	8130422388963245	CMakeFiles/binance_capture.dir/src/main.cpp.obj	a2b1ed91c926c9e1
+26452	27008	8130422653155512	binance_capture.exe	a5738666a7467f0e
