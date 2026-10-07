@@ -126,7 +126,7 @@ The live local book uses a REST snapshot capped at 1,000 levels per side; it is 
 Replay mode is an optional local-review feature for regenerating order-book rows from a captured market-data CSV without contacting Binance. It shares the same normalized event processor, order-book logic, fixed-point parser, and sequence handling used by live capture.
 
 ```bash
-./build-linux/binance_capture --replay ./output-linux-90s/market_data.csv --output-dir ./replay-output
+./build-linux/binance_capture --replay ./output/market_data.csv --output-dir ./replay-output
 ```
 
 The input must use the exact 9-column market-data header and contain one venue, symbol, and shard, with contiguous `conn_seq` values within each increasing `conn_epoch`. RFC4180 quoting is parsed and unescaped before `payload_json` is parsed. Invalid headers, CSV fields, JSON, timestamps, sequence metadata, stream kinds, and depth numerics fail with the input row number where available.
@@ -163,9 +163,39 @@ WebSocket depth -> sequence validation -> gap/reconnect?
 
 Deterministic fault-injection tests cover snapshot parsing for both venues, buffer bridging/stale discard, multi-event continuity, gap and `pu` mismatch recovery, reconnect state reset, overflow, malformed responses, HTTP 418/429 backoff, and output book correctness. The final 12-second live Spot run fetched snapshot `101129856626`, buffered 7 events, discarded 5 stale events, and applied 2. The final 12-second USD-M run fetched snapshot `11753732261170`, buffered 5 events, and discarded all 5 as stale. Both shut down normally; neither naturally triggered a gap or reconnect. Dynamic live gap/reconnect recovery remains unverified.
 
+### Metrics and Replay Benchmark
+
+Live capture prints a metrics summary at normal shutdown. It reports elapsed monotonic runtime, event counts by stream, emitted order-book rows, applied and stale diffs, zero-quantity updates observed in depth-diff messages, reconnects, successful REST resynchronizations, REST snapshot failures, and events per second. Invalid input terminates the current operation, so it is not included in the normal-shutdown metrics summary.
+
+Replay can report processing performance with the optional `--benchmark` flag:
+
+```bash
+./build-linux/binance_capture --replay ./output/market_data.csv --output-dir ./benchmark-output --benchmark
+```
+
+Benchmark mode uses the normal replay pipeline, writes the regular `order_book.csv`, and reports event/row counts, elapsed processing time, events per second, and rows per second. For the same input, it produces the same deterministic replay output; benchmark timing does not affect processing. Throughput depends on the machine, build, and filesystem; the measured time includes replay processing and flushing the output file.
+
 ## Validation
 
-The validated Linux/WSL toolchain is GCC 13.3.0 and CMake 3.28.3. A prior clean Release build completed with `-Wall -Wextra`. In the final submission-readiness pass on 2026-10-07, `cmake --build build-linux --parallel` completed with `ninja: no work to do`, and `ctest --test-dir build-linux --output-on-failure` passed 3/3. Earlier direct runs of all three test executables also passed.
+The validated Linux/WSL toolchain is GCC 13.3.0 and CMake 3.28.3. A prior clean Release build completed with `-Wall -Wextra`. On 2026-10-07, `cmake --build build-linux --parallel` completed after adding metrics, and `ctest --test-dir build-linux --output-on-failure` passed 4/4. Earlier direct runs of the original test executables also passed.
+
+Latest reported benchmark, using the local `output-linux-90s/market_data.csv` validation capture:
+
+```text
+Input events:       3980
+depth_diff:         846
+depth5:             846
+trade:             2288
+Applied diffs:        0
+Stale diffs:        846
+Gaps:                 0
+Order-book rows:    846
+Elapsed:           0.26 s
+Events/sec:     15459.61
+Rows/sec:        3286.14
+```
+
+Normal replay, benchmark replay, and the original order-book CSV had the same SHA-256. This is one environment-specific measurement, not a performance guarantee.
 
 Spot capture: `output-linux-90s/` contains the latest paired BTCUSDT run made with a 90-second limit. Its event timestamps span 84.245585 seconds; three receive timestamps moved backward by approximately 1.4–1.6 seconds, while `conn_seq` remained ordered. It recorded 3,980 market rows: 2,288 trades, 846 depth5 events, and 846 depth diffs; 846 order-book rows were replay-checked. All three stream types arrived, CSV/JSON schemas validated, and every order-book row matched its depth5 source snapshot. All 846 diffs were stale against the latest snapshot baseline, so this capture did not demonstrate applied Spot diffs or deletions. No gaps or reconnects occurred.
 
@@ -183,4 +213,4 @@ git tag -a v1.0.0 -m "Submission v1.0.0"
 git push submission v1.0.0
 ```
 
-The project `.gitignore` excludes build outputs, ordinary capture directories, compiled artifacts, logs, and local secret configuration. It keeps the two `output-linux-90s/` sample CSVs eligible for submission. Ignore rules do not remove files already tracked by Git; review `git ls-files` before staging so generated build outputs, scratch probes, and other capture CSVs are not included accidentally. Never submit credentials, API keys, or private keys.
+The project `.gitignore` excludes build outputs, generated capture/benchmark directories, compiled artifacts, logs, and local secret configuration. `output/` is the selected output directory to include; local folders such as `output-linux-90s/`, `output-benchmark-metrics/`, `output-replay-metrics/`, `output-linux/`, and `output-usdm/` are excluded. Ignore rules do not remove files already tracked by Git, so check `git status` and `git ls-files` before staging. Never submit credentials, API keys, or private keys.

@@ -1,5 +1,6 @@
 #include "binance_capture.hpp"
 #include "market_replay.hpp"
+#include "metrics.hpp"
 #include "rest_snapshot_client.hpp"
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -37,7 +39,7 @@ void signalHandler(int) {
 
 std::string usage() {
     return "Usage: binance_capture --venue spot|usdm --symbols SYMBOL --output-dir PATH\n"
-           "   or: binance_capture --replay MARKET_CSV --output-dir PATH";
+           "   or: binance_capture --replay MARKET_CSV --output-dir PATH [--benchmark]";
 }
 
 bool hasArg(int argc, char** argv, const std::string& key) {
@@ -145,7 +147,11 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("unable to create replay order_book.csv: " + orderbook_path.string());
             }
 
-            const auto stats = binance_capture::replayMarketDataCsv(market_csv, orderbook_csv);
+            const bool benchmark = hasArg(argc, argv, "--benchmark");
+            binance_capture::MetricsCollector replay_metrics;
+            const auto benchmark_started = std::chrono::steady_clock::now();
+            const auto stats = binance_capture::replayMarketDataCsv(
+                market_csv, orderbook_csv, benchmark ? &replay_metrics : nullptr);
             orderbook_csv.flush();
             if (!orderbook_csv) {
                 throw std::runtime_error("failed flushing replay order_book.csv");
@@ -160,7 +166,25 @@ int main(int argc, char** argv) {
                       << " ignored_out_of_sync=" << stats.ignored_out_of_sync_events
                       << " order_book_rows=" << stats.order_book_rows
                       << " rejected=0 output=" << orderbook_path.string() << '\n';
+            if (benchmark) {
+                const double elapsed_seconds = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - benchmark_started).count();
+                const auto counts = replay_metrics.snapshot();
+                std::cout << "=== Replay Benchmark ===\n"
+                          << std::fixed << std::setprecision(2)
+                          << "Input events:       " << stats.market_events << '\n'
+                          << "Order-book rows:    " << stats.order_book_rows << '\n'
+                          << "Elapsed:            " << elapsed_seconds << " s\n"
+                          << "Events/sec:         " << binance_capture::MetricsCollector::ratePerSecond(
+                                 counts.total_events, elapsed_seconds) << '\n'
+                          << "Rows/sec:           " << binance_capture::MetricsCollector::ratePerSecond(
+                                 counts.order_book_rows, elapsed_seconds) << '\n';
+            }
             return 0;
+        }
+
+        if (hasArg(argc, argv, "--benchmark")) {
+            throw std::invalid_argument("--benchmark requires --replay");
         }
 
         const std::string venue_arg = readArg(argc, argv, "--venue");
@@ -208,6 +232,8 @@ int main(int argc, char** argv) {
         uint64_t conn_seq = 0;
         binance_capture::OrderBookProcessor orderbook_processor(
             venue, symbol, binance_capture::OrderBookRecoveryMode::rest_snapshot);
+        binance_capture::MetricsCollector capture_metrics;
+        const auto capture_started = std::chrono::steady_clock::now();
 
         while (!g_stop_requested.load(std::memory_order_relaxed)) {
             try {
@@ -276,6 +302,7 @@ int main(int argc, char** argv) {
                         });
                         rest_request_in_flight = true;
                     } catch (const std::exception& exc) {
+                        capture_metrics.recordRestSnapshotFailure();
                         const auto delay = binance_capture::restRetryDelaySeconds(rest_attempt);
                         std::cerr << "Unable to start REST snapshot request: " << exc.what()
                                   << "; retrying in " << delay << " seconds.\n";
@@ -300,6 +327,7 @@ int main(int argc, char** argv) {
                     try {
                         snapshot_payload = rest_future.get();
                     } catch (const binance_capture::RestRequestError& exc) {
+                        capture_metrics.recordRestSnapshotFailure();
                         if (discard_rest_result) {
                             discard_rest_result = false;
                             next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -312,6 +340,7 @@ int main(int argc, char** argv) {
                         next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(delay);
                         return;
                     } catch (const std::exception& exc) {
+                        capture_metrics.recordRestSnapshotFailure();
                         if (discard_rest_result) {
                             discard_rest_result = false;
                             next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -346,6 +375,9 @@ int main(int argc, char** argv) {
                             return;
                         }
                         writeRecoveredRows(recovery.rows);
+                        capture_metrics.recordRecoveredDepthEvents(
+                            recovery.rows.size(), recovery.stale_events_discarded, recovery.rows.size());
+                        capture_metrics.recordRestResynchronization();
                         std::cout << "REST resync complete: venue=" << venue << " symbol=" << symbol
                                   << " snapshot_seq=" << recovery.snapshot_update_id
                                   << " buffered_events=" << recovery.buffered_events
@@ -354,6 +386,7 @@ int main(int argc, char** argv) {
                         rest_attempt = 0;
                         resync_reason.clear();
                     } catch (const std::exception& exc) {
+                        capture_metrics.recordRestSnapshotFailure();
                         const auto delay = binance_capture::restRetryDelaySeconds(rest_attempt);
                         std::cerr << "Invalid REST depth snapshot: " << exc.what() << "; venue=" << venue
                                   << " symbol=" << symbol << "; retrying in " << delay << " seconds.\n";
@@ -400,6 +433,7 @@ int main(int argc, char** argv) {
                         payload
                     };
                     const auto processed = orderbook_processor.process(event);
+                    capture_metrics.observeEvent(event, processed);
                     if (processed.disposition == binance_capture::EventDisposition::gap) {
                         resync_reason = "differential sequence gap";
                         std::cerr << "Depth sequence gap; buffering updates and requesting REST snapshot.\n";
@@ -435,6 +469,7 @@ int main(int argc, char** argv) {
                 if (g_stop_requested.load(std::memory_order_relaxed)) {
                     break;
                 }
+                capture_metrics.recordReconnect();
                 ++conn_epoch;
                 conn_seq = 0;
                 orderbook_processor.beginResynchronization();
@@ -448,6 +483,25 @@ int main(int argc, char** argv) {
 
         market_csv.close();
         orderbook_csv.close();
+        const double elapsed_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - capture_started).count();
+        const auto counts = capture_metrics.snapshot();
+        std::cout << "=== Capture Metrics ===\n"
+                  << std::fixed << std::setprecision(2)
+                  << "Runtime:              " << elapsed_seconds << " s\n"
+                  << "Total events:         " << counts.total_events << '\n'
+                  << "Trade events:         " << counts.trade_events << '\n'
+                  << "Depth diff events:    " << counts.depth_diff_events << '\n'
+                  << "Depth5 events:        " << counts.depth5_events << '\n'
+                  << "Order-book rows:      " << counts.order_book_rows << '\n'
+                  << "Diffs applied:        " << counts.depth_diffs_applied << '\n'
+                  << "Stale diffs:          " << counts.stale_depth_diffs << '\n'
+                  << "Zero-quantity updates: " << counts.zero_quantity_updates << '\n'
+                  << "Reconnects:           " << counts.reconnects << '\n'
+                  << "REST resyncs:         " << counts.rest_resynchronizations << '\n'
+                  << "REST failures:        " << counts.rest_snapshot_failures << '\n'
+                  << "Events/sec:           " << binance_capture::MetricsCollector::ratePerSecond(
+                         counts.total_events, elapsed_seconds) << '\n';
         std::cout << "Shutdown complete.\n";
         return 0;
     } catch (const std::exception& exc) {

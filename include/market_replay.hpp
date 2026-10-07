@@ -50,6 +50,7 @@ struct ProcessedMarketEvent {
 };
 
 struct SnapshotRecoveryResult;
+class MetricsCollector;
 
 class OrderBookProcessor {
 public:
@@ -111,6 +112,8 @@ void writeOrderBookCsvHeader(std::ostream& output);
 void writeOrderBookCsvRow(std::ostream& output, const OrderBookRow& row);
 RestDepthSnapshot parseRestDepthSnapshot(const std::string& venue, const nlohmann::json& payload);
 uint32_t restRetryDelaySeconds(uint32_t failed_attempt, uint32_t retry_after_seconds = 0);
-ReplayStats replayMarketDataCsv(std::istream& input, std::ostream& order_book_output);
+ReplayStats replayMarketDataCsv(std::istream& input,
+                                std::ostream& order_book_output,
+                                MetricsCollector* metrics = nullptr);
 
 }  // namespace binance_capture

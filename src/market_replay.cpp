@@ -1,4 +1,5 @@
 #include "market_replay.hpp"
+#include "metrics.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -529,7 +530,9 @@ void writeOrderBookCsvRow(std::ostream& output, const OrderBookRow& row) {
     }
 }
 
-ReplayStats replayMarketDataCsv(std::istream& input, std::ostream& order_book_output) {
+ReplayStats replayMarketDataCsv(std::istream& input,
+                                std::ostream& order_book_output,
+                                MetricsCollector* metrics) {
     MarketDataCsvReader reader(input);
     writeOrderBookCsvHeader(order_book_output);
     ReplayStats stats;
@@ -556,6 +559,9 @@ ReplayStats replayMarketDataCsv(std::istream& input, std::ostream& order_book_ou
         } catch (const std::exception& exc) {
             throw std::runtime_error("market_data.csv row " + std::to_string(reader.rowNumber()) +
                                      ": " + exc.what());
+        }
+        if (metrics != nullptr) {
+            metrics->observeEvent(event, result);
         }
         switch (result.disposition) {
             case EventDisposition::applied_diff: ++stats.applied_diff_events; break;

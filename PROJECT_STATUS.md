@@ -2,7 +2,7 @@
 
 ## Current phase
 
-Mandatory implementation stable; optional replay and REST snapshot resynchronization are implemented with deterministic tests and short live validation.
+Mandatory implementation stable; optional replay, REST snapshot resynchronization, and lightweight metrics/replay benchmarking are implemented and covered by tests.
 
 ## Implemented
 
@@ -13,6 +13,7 @@ Mandatory implementation stable; optional replay and REST snapshot resynchroniza
 - Fixed-point decimal-string scaling at `10^8` with int64 overflow and excessive-precision checks; no floating-point conversion in price/quantity output.
 - Spot `U/u` and USD-M `U/u/pu` stale/gap processing, including the first USD-M diff overlap after a depth5 baseline.
 - REST snapshot plus buffered differential recovery for gaps and reconnects, using the shared order-book processor.
+- Lightweight live/replay event metrics and replay benchmark reporting, without changing CSV schemas or order-book decisions.
 - Reconnect state reset, connection epoch/sequence handling, per-row CSV flushing, SIGINT/SIGTERM stop handling, and RAII socket/TLS teardown.
 - README schemas, CLI, sequence policy, toolchain/build instructions, validation results, limitations, and GitHub submission guidance.
 
@@ -34,9 +35,8 @@ Mandatory implementation stable; optional replay and REST snapshot resynchroniza
 
 - Assignment PDF, current source tree, CMake, tests, README, project status, git state, and generated Spot/USD-M CSVs reviewed.
 - Linux/WSL Release build using GCC 13.3.0 (`/usr/bin/c++`) and CMake 3.28.3; clean build completed with `-Wall -Wextra` and no compiler warnings reported.
-- Current final-pass verification (2026-10-07, WSL): `cmake --build build-linux --parallel` completed with `ninja: no work to do`; `ctest --test-dir build-linux --output-on-failure` passed 3/3 (`order_book_tests`, `market_replay_tests`, `resync_tests`). This was an incremental build, not a clean rebuild.
-- `ctest --test-dir build-linux --output-on-failure`: 3/3 passed; a final clean Release rebuild and all three tests also passed.
-- `./build-linux/order_book_tests`, `./build-linux/market_replay_tests`, and `./build-linux/resync_tests`: passed directly.
+- Metrics feature verification (2026-10-07, WSL): `cmake --build build-linux --parallel` completed successfully; CTest passed 4/4 (`order_book_tests`, `market_replay_tests`, `resync_tests`, `metrics_tests`).
+- Replay benchmark as reported by the user: 3,980 events, 846 order-book rows, 0.26 seconds, 15,459.61 events/sec, 3,286.14 rows/sec. Timing is machine/build/filesystem dependent.
 - A final clean Release rebuild completed after adding the asynchronous REST client; no compiler warnings were reported.
 - The current Spot sample and earlier USD-M capture were parsed with strict CSV/JSON readers and independently replayed for order-book consistency. The USD-M CSV files are no longer present in the workspace. Headers/widths, compact inner payloads, CSV quoting, timestamps, ordering, and state equality were checked while available.
 - The Spot 90-second market CSV replayed successfully; output matched the original order-book CSV and a second replay byte-for-byte.
@@ -70,7 +70,7 @@ Mandatory implementation stable; optional replay and REST snapshot resynchroniza
 - depth5 remains a read-only partial sanity observation in REST mode. Mismatches are logged at most once per connection and do not replace the REST book or initiate repeated REST requests.
 - In replay mode, depth5 seeds/replaces the replayed modeled top-five state. In live REST mode, REST is authoritative and depth5 is read-only sanity data. Accepted diffs update levels; quantity zero erases a level. Trades only enter the market CSV.
 - A detected gap or connection failure suppresses diffs until a REST snapshot plus buffered bridge succeeds. A connection failure clears the book and baseline, increments `conn_epoch`, and resets `conn_seq` to 1 for the next epoch.
-- One blocking WebSocket reader/writer with a bounded asynchronous REST request; market and book rows are flushed synchronously. No multi-symbol support, sharding, or metrics are implemented.
+- One blocking WebSocket reader/writer with a bounded asynchronous REST request; market and book rows are flushed synchronously. No multi-symbol support or sharding is implemented.
 
 ## Build
 
@@ -86,9 +86,17 @@ Toolchain: GCC 13.3.0, CMake 3.28.3, C++17. Dependencies: Boost.Asio/Beast, Boos
 
 ## Tests
 
-- Current WSL CTest run: 3/3 passed (`order_book_tests`, `market_replay_tests`, and `resync_tests`). The build command completed with `ninja: no work to do`.
+- Current WSL CTest run: 4/4 passed (`order_book_tests`, `market_replay_tests`, `resync_tests`, and `metrics_tests`).
 - Prior direct runs of `order_book_tests`, `market_replay_tests`, and `resync_tests` passed.
-- Tests cover order-book updates/deletions, CSV/header contracts, fixed-point limits, Spot/USD-M sequence rules, mocked REST parsing/failures/rate limits, buffered recovery, reconnect-state isolation, bounded overflow, depth5 sanity, and replay determinism.
+- Tests cover order-book updates/deletions, CSV/header contracts, fixed-point limits, Spot/USD-M sequence rules, mocked REST parsing/failures/rate limits, buffered recovery, reconnect-state isolation, bounded overflow, depth5 sanity, replay determinism, metrics counters/rates, and benchmark replay output equivalence.
+
+## Metrics and Benchmark
+
+- Live shutdown reports monotonic runtime, event counts by stream, emitted rows, applied/stale diffs, zero-quantity updates observed in depth-diff messages, reconnects, successful REST resynchronizations, REST snapshot failures, and event throughput.
+- `--benchmark` is available with `--replay`; it runs the existing replay processor, writes the standard `order_book.csv`, and reports elapsed time, events/sec, and rows/sec.
+- Benchmark command: `./build-linux/binance_capture --replay ./output/market_data.csv --output-dir ./benchmark-output --benchmark`.
+- Invalid events abort replay/capture and are not included in the normal completion summary; no rejected-event counter is reported.
+- Latest reported run: 3,980 events and 846 rows in 0.26 seconds (15,459.61 events/sec; 3,286.14 rows/sec). These values are environment-specific.
 
 ## Files Changed Recently
 
@@ -98,7 +106,7 @@ Toolchain: GCC 13.3.0, CMake 3.28.3, C++17. Dependencies: Boost.Asio/Beast, Boos
 
 ## Current Git Status
 
-No commit was made. The current worktree has modifications to `CMakeLists.txt`, `.gitignore`, `README.md`, `PROJECT_STATUS.md`, `include/binance_capture.hpp`, `include/market_replay.hpp`, `src/binance_capture.cpp`, `src/main.cpp`, `src/market_replay.cpp`, and `tests/test_replay.cpp`; build/test execution has also modified tracked files under `build-linux/`. The REST files `include/rest_snapshot_client.hpp`, `src/rest_snapshot_client.cpp`, and `tests/test_resync.cpp` are currently untracked and are required by the current CMake targets. The two `output-linux-90s/` CSVs are tracked sample artifacts. Other generated files are tracked too: CMake/Ninja outputs and binaries under `build/` and `build-linux/`, `output/` and `output-linux/` capture CSVs, and root scratch probes `ssl_test.cpp`, `ssl_test.exe`, `test.cpp`, and `test.exe`. These existing tracked artifacts are not removed by `.gitignore`; review them before staging. The branch is `main`, tracking `origin/main`; `origin` points to `https://github.com/indreshverma2004/ordertracker.git`, which appears unrelated to this assignment. Do not push this assignment to that remote. The `output-linux-90s/` sample is the intended capture deliverable; the other capture directories are generated local output.
+No commit was made. The current worktree has modifications to `CMakeLists.txt`, `.gitignore`, `README.md`, `PROJECT_STATUS.md`, `include/market_replay.hpp`, `src/main.cpp`, and `src/market_replay.cpp`, plus tracked generated changes under `build-linux/`. Metrics files `include/metrics.hpp`, `src/metrics.cpp`, and `tests/test_metrics.cpp` are untracked and required by CMake. The REST files are tracked. `output/` is the selected output folder to retain for submission. Other capture/benchmark folders are ignored; the tracked `output-linux-90s/` CSVs are staged for removal from Git while their local copies remain. Other generated files remain tracked under `build/` and `build-linux/`, along with root scratch probes `ssl_test.cpp`, `ssl_test.exe`, `test.cpp`, and `test.exe`; `.gitignore` does not remove already tracked files. The branch is `main`, tracking `origin/main`; `origin` points to `https://github.com/indreshverma2004/ordertracker.git`, which appears unrelated to this assignment. Do not push this assignment to that remote.
 
 ## Optional Features Completed
 
