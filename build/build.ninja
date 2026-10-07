@@ -102,7 +102,7 @@ build CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.obj: CXX_COMPILE
   CONFIG = Release
   DEFINES = -DBOOST_ATOMIC_NO_LIB -DBOOST_ATOMIC_STATIC_LINK -DBOOST_CHRONO_NO_LIB -DBOOST_CHRONO_STATIC_LINK -DBOOST_CONTAINER_NO_LIB -DBOOST_CONTAINER_STATIC_LINK -DBOOST_DATE_TIME_NO_LIB -DBOOST_DATE_TIME_STATIC_LINK -DBOOST_THREAD_NO_LIB -DBOOST_THREAD_STATIC_LINK -DBOOST_THREAD_USE_LIB -D_WIN32_WINNT=0x0A00
   DEP_FILE = CMakeFiles\order_book_tests.dir\tests\test_order_book.cpp.obj.d
-  FLAGS = -Wall -Wextra -O2 -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2
+  FLAGS = -Wall -Wextra -O2 -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2 -UNDEBUG
   INCLUDES = -IC:/Users/HP/Desktop/assignment/include
   OBJECT_DIR = CMakeFiles\order_book_tests.dir
   OBJECT_FILE_DIR = CMakeFiles\order_book_tests.dir\tests
@@ -112,7 +112,7 @@ build CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.obj: CXX_COMPILER_
   CONFIG = Release
   DEFINES = -DBOOST_ATOMIC_NO_LIB -DBOOST_ATOMIC_STATIC_LINK -DBOOST_CHRONO_NO_LIB -DBOOST_CHRONO_STATIC_LINK -DBOOST_CONTAINER_NO_LIB -DBOOST_CONTAINER_STATIC_LINK -DBOOST_DATE_TIME_NO_LIB -DBOOST_DATE_TIME_STATIC_LINK -DBOOST_THREAD_NO_LIB -DBOOST_THREAD_STATIC_LINK -DBOOST_THREAD_USE_LIB -D_WIN32_WINNT=0x0A00
   DEP_FILE = CMakeFiles\order_book_tests.dir\src\binance_capture.cpp.obj.d
-  FLAGS = -Wall -Wextra -O2 -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2
+  FLAGS = -Wall -Wextra -O2 -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2 -UNDEBUG
   INCLUDES = -IC:/Users/HP/Desktop/assignment/include
   OBJECT_DIR = CMakeFiles\order_book_tests.dir
   OBJECT_FILE_DIR = CMakeFiles\order_book_tests.dir\src

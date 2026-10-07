@@ -12,7 +12,12 @@ namespace binance_capture {
 
 constexpr int64_t PRICE_SCALE = 100000000LL;
 constexpr int64_t QTY_SCALE = 100000000LL;
-constexpr int64_t MAX_SEQUENCE_GAP = 1LL;
+
+enum class DepthSequenceStatus {
+    applied,
+    stale,
+    gap
+};
 
 struct DepthLevel {
     int64_t price = 0;
@@ -59,6 +64,10 @@ std::string buildOrderBookHeader();
 std::string compactJson(const nlohmann::json& value);
 int64_t scaledIntegerFromString(const std::string& text, int64_t scale, const std::string& label);
 uint32_t stableInstrumentId(const std::string& symbol);
+uint64_t depthSnapshotUpdateId(const nlohmann::json& payload);
+DepthSequenceStatus applyDepthSequence(const std::string& venue,
+                                       const nlohmann::json& payload,
+                                       uint64_t& last_update_id);
 
 class OrderBook {
 public:

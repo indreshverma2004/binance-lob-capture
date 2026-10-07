@@ -20,11 +20,22 @@ include_directories(include)
 
 add_executable(binance_capture src/main.cpp src/binance_capture.cpp)
 target_include_directories(binance_capture PRIVATE include)
-target_link_libraries(binance_capture PRIVATE OpenSSL::SSL OpenSSL::Crypto Boost::system Boost::thread nlohmann_json::nlohmann_json ws2_32)
+target_link_libraries(binance_capture PRIVATE OpenSSL::SSL OpenSSL::Crypto Boost::system Boost::thread nlohmann_json::nlohmann_json)
 
 add_executable(order_book_tests tests/test_order_book.cpp src/binance_capture.cpp)
 target_include_directories(order_book_tests PRIVATE include)
-target_link_libraries(order_book_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto Boost::system Boost::thread nlohmann_json::nlohmann_json ws2_32)
+target_link_libraries(order_book_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto Boost::system Boost::thread nlohmann_json::nlohmann_json)
+
+if(WIN32)
+  target_link_libraries(binance_capture PRIVATE ws2_32)
+  target_link_libraries(order_book_tests PRIVATE ws2_32)
+endif()
+
+if(MSVC)
+  target_compile_options(order_book_tests PRIVATE /UNDEBUG)
+else()
+  target_compile_options(order_book_tests PRIVATE -UNDEBUG)
+endif()
 
 enable_testing()
 add_test(NAME order_book_tests COMMAND order_book_tests)

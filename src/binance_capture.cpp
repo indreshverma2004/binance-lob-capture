@@ -1,34 +1,38 @@
 #include "binance_capture.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
 namespace binance_capture {
 
 namespace {
 
-std::vector<std::string> splitStreamName(const std::string& stream_name) {
-    std::vector<std::string> parts;
-    std::string part;
-    std::stringstream ss(stream_name);
-    while (std::getline(ss, part, '/')) {
-        if (!part.empty()) {
-            parts.push_back(part);
+uint64_t sequenceValue(const nlohmann::json& payload, const std::string& field) {
+    if (!payload.contains(field)) {
+        throw std::invalid_argument("depth event missing sequence field " + field);
+    }
+    const auto& value = payload[field];
+    if (value.is_number_unsigned()) {
+        return value.get<uint64_t>();
+    }
+    if (value.is_number_integer()) {
+        const auto signed_value = value.get<int64_t>();
+        if (signed_value >= 0) {
+            return static_cast<uint64_t>(signed_value);
+        }
+    } else if (value.is_string()) {
+        const auto text = value.get<std::string>();
+        uint64_t parsed = 0;
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
+        if (result.ec == std::errc{} && result.ptr == text.data() + text.size()) {
+            return parsed;
         }
     }
-    return parts;
-}
-
-std::string formatInt64(int64_t value) {
-    return std::to_string(value);
+    throw std::invalid_argument("depth event has invalid sequence field " + field);
 }
 
 }  // namespace
@@ -60,8 +64,11 @@ std::string normalizeSymbol(const std::string& symbol) {
 }
 
 std::string buildStreamQuery(const std::string& venue, const std::string& symbol) {
-    const std::string normalized_symbol = normalizeSymbol(symbol);
-    std::string query = normalized_symbol + "@depth@100ms/" + normalized_symbol + "@depth5@100ms/" + normalized_symbol + "@trade";
+    std::string stream_symbol = normalizeSymbol(symbol);
+    std::transform(stream_symbol.begin(), stream_symbol.end(), stream_symbol.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    const std::string query = stream_symbol + "@depth@100ms/" + stream_symbol + "@depth5@100ms/" + stream_symbol + "@trade";
     if (venue == "spot") {
         return "wss://stream.binance.com:9443/stream?streams=" + query;
     }
@@ -179,6 +186,39 @@ uint32_t stableInstrumentId(const std::string& symbol) {
         hash *= 16777619u;
     }
     return hash % 2147483647u;
+}
+
+uint64_t depthSnapshotUpdateId(const nlohmann::json& payload) {
+    return sequenceValue(payload, "lastUpdateId");
+}
+
+DepthSequenceStatus applyDepthSequence(const std::string& venue,
+                                       const nlohmann::json& payload,
+                                       uint64_t& last_update_id) {
+    const uint64_t first_update_id = sequenceValue(payload, "U");
+    const uint64_t final_update_id = sequenceValue(payload, "u");
+    if (first_update_id > final_update_id) {
+        throw std::invalid_argument("depth event has an invalid U/u range");
+    }
+    if (final_update_id <= last_update_id) {
+        return DepthSequenceStatus::stale;
+    }
+
+    if (venue == "spot") {
+        if (last_update_id == std::numeric_limits<uint64_t>::max() ||
+            first_update_id > last_update_id + 1) {
+            return DepthSequenceStatus::gap;
+        }
+    } else if (venue == "usdm") {
+        if (sequenceValue(payload, "pu") != last_update_id) {
+            return DepthSequenceStatus::gap;
+        }
+    } else {
+        throw std::invalid_argument("venue must be spot or usdm");
+    }
+
+    last_update_id = final_update_id;
+    return DepthSequenceStatus::applied;
 }
 
 std::string classifyStream(const std::string& stream_name) {

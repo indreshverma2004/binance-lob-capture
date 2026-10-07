@@ -1,0 +1,5 @@
+/mnt/c/Users/HP/Desktop/assignment/build-linux/CMakeFiles/binance_capture.dir
+/mnt/c/Users/HP/Desktop/assignment/build-linux/CMakeFiles/order_book_tests.dir
+/mnt/c/Users/HP/Desktop/assignment/build-linux/CMakeFiles/test.dir
+/mnt/c/Users/HP/Desktop/assignment/build-linux/CMakeFiles/edit_cache.dir
+/mnt/c/Users/HP/Desktop/assignment/build-linux/CMakeFiles/rebuild_cache.dir

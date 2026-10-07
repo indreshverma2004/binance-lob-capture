@@ -1,5 +1,6 @@
 #include "binance_capture.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -9,6 +10,7 @@
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/websocket/ssl.hpp>
 #include <chrono>
+#include <cctype>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
@@ -141,27 +143,6 @@ void writeOrderBookRow(std::ofstream& orderbook_csv,
     orderbook_csv << '\n';
 }
 
-bool hasGap(const nlohmann::json& payload, int64_t last_depth_seq, std::string& reason) {
-    if (!payload.contains("u") || !payload.contains("pu")) {
-        return false;
-    }
-    const auto u_value = payload["u"];
-    const auto pu_value = payload["pu"];
-    if (u_value.is_number_unsigned() || u_value.is_number_integer() || u_value.is_string()) {
-        const uint64_t u = static_cast<uint64_t>(std::stoll(u_value.is_string() ? u_value.get<std::string>() : std::to_string(u_value.get<int64_t>())));
-        const uint64_t pu = static_cast<uint64_t>(std::stoll(pu_value.is_string() ? pu_value.get<std::string>() : std::to_string(pu_value.get<int64_t>())));
-        if (last_depth_seq >= 0 && u > static_cast<uint64_t>(last_depth_seq + binance_capture::MAX_SEQUENCE_GAP)) {
-            reason = "depth sequence gap detected: u=" + std::to_string(u) + " > last=" + std::to_string(last_depth_seq) + " + 1";
-            return true;
-        }
-        if (last_depth_seq >= 0 && pu != static_cast<uint64_t>(last_depth_seq)) {
-            reason = "depth sequence mismatch: pu=" + std::to_string(pu) + " expected " + std::to_string(last_depth_seq);
-            return true;
-        }
-    }
-    return false;
-}
-
 int main(int argc, char** argv) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
@@ -179,6 +160,10 @@ int main(int argc, char** argv) {
         const std::vector<std::string> symbols = splitSymbols(symbols_arg);
         if (symbols.empty()) {
             std::cerr << "No valid symbols were provided.\n";
+            return 2;
+        }
+        if (symbols.size() != 1) {
+            std::cerr << "This build supports one symbol per run.\n";
             return 2;
         }
 
@@ -207,8 +192,9 @@ int main(int argc, char** argv) {
         uint64_t conn_epoch = 0;
         uint64_t conn_seq = 0;
         uint64_t orderbook_seq = 0;
-        int64_t last_depth_seq = -1;
-        bool book_out_of_sync = false;
+        uint64_t last_depth_seq = 0;
+        bool have_depth_baseline = false;
+        bool book_out_of_sync = true;
         binance_capture::OrderBook order_book;
 
         while (!g_stop_requested.load(std::memory_order_relaxed)) {
@@ -258,20 +244,24 @@ int main(int argc, char** argv) {
                 while (!g_stop_requested.load(std::memory_order_relaxed)) {
                     beast::flat_buffer buffer;
                     ws.read(buffer);
-                    const std::string raw = beast::buffers_to_string(buffer.data());
-                    const auto doc = parseJsonOrThrow(raw);
-                    if (!doc.is_object() || !doc.contains("stream") || !doc.contains("data")) {
-                        throw std::runtime_error("Malformed combined stream message");
-                    }
-
-                    const std::string stream_name = doc["stream"].get<std::string>();
-                    const std::string stream_kind = binance_capture::classifyStream(stream_name);
-                    const auto payload = doc["data"];
                     const auto now = std::chrono::system_clock::now();
                     const auto t = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch());
                     const auto tn = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch() - std::chrono::duration_cast<std::chrono::nanoseconds>(t));
                     const int64_t recv_tsec = static_cast<int64_t>(t.count());
                     const int32_t recv_tnsec = static_cast<int32_t>(tn.count());
+
+                    const std::string raw = beast::buffers_to_string(buffer.data());
+                    const auto doc = parseJsonOrThrow(raw);
+                    if (!doc.is_object() || !doc.contains("stream") || !doc.contains("data")) {
+                        throw std::runtime_error("Malformed combined stream message");
+                    }
+                    if (!doc["data"].is_object()) {
+                        throw std::runtime_error("Combined stream data must be an object");
+                    }
+
+                    const std::string stream_name = doc["stream"].get<std::string>();
+                    const std::string stream_kind = binance_capture::classifyStream(stream_name);
+                    const auto payload = doc["data"];
 
                     ++conn_seq;
                     writeMarketDataRow(market_csv, venue, stream_kind, 0, conn_epoch, conn_seq, symbol, payload, recv_tsec, recv_tnsec);
@@ -280,37 +270,40 @@ int main(int argc, char** argv) {
                     if (stream_kind == "depth_diff") {
                         const auto bid_levels = parseDepthArray(payload, "b");
                         const auto ask_levels = parseDepthArray(payload, "a");
-                        std::string gap_reason;
-                        if (book_out_of_sync) {
-                            std::cout << "Book marked out-of-sync; waiting for depth5 refresh.\n";
-                        } else if (payload.contains("u") && hasGap(payload, last_depth_seq, gap_reason)) {
-                            book_out_of_sync = true;
-                            std::cerr << "Sequence gap: " << gap_reason << '\n';
+                        if (book_out_of_sync || !have_depth_baseline) {
                             continue;
-                        } else {
-                            if (payload.contains("u")) {
-                                last_depth_seq = static_cast<int64_t>(payload["u"].get<int64_t>());
-                            }
-                            order_book.applyDepthDiff(bid_levels, ask_levels);
-                            const auto top = order_book.topFive();
-                            (void)top;
-                            const auto row_type = 'D';
-                            const auto side = 'N';
-                            ++orderbook_seq;
-                            writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, binance_capture::stableInstrumentId(symbol), row_type, side);
-                            orderbook_csv.flush();
                         }
+                        const auto sequence_status = binance_capture::applyDepthSequence(venue, payload, last_depth_seq);
+                        if (sequence_status == binance_capture::DepthSequenceStatus::gap) {
+                            book_out_of_sync = true;
+                            have_depth_baseline = false;
+                            std::cerr << "Depth sequence gap; waiting for depth5 refresh.\n";
+                            continue;
+                        }
+                        if (sequence_status == binance_capture::DepthSequenceStatus::stale) {
+                            continue;
+                        }
+                        order_book.applyDepthDiff(bid_levels, ask_levels);
+                        ++orderbook_seq;
+                        writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, static_cast<int32_t>(binance_capture::stableInstrumentId(symbol)), 'D', 'N');
+                        orderbook_csv.flush();
                     } else if (stream_kind == "depth5") {
                         const auto bid_levels = parseDepthArray(payload, "bids");
                         const auto ask_levels = parseDepthArray(payload, "asks");
                         order_book.applyDepth5(bid_levels, ask_levels);
+                        last_depth_seq = binance_capture::depthSnapshotUpdateId(payload);
+                        have_depth_baseline = true;
                         book_out_of_sync = false;
                         ++orderbook_seq;
-                        writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, binance_capture::stableInstrumentId(symbol), 'S', 'N');
+                        writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, static_cast<int32_t>(binance_capture::stableInstrumentId(symbol)), 'S', 'N');
                         orderbook_csv.flush();
                     } else if (stream_kind == "trade") {
                         // Trade events are written to market_data.csv only and do not modify the local book.
                     }
+                }
+                if (g_stop_requested.load(std::memory_order_relaxed)) {
+                    beast::error_code close_error;
+                    ws.close(websocket::close_code::normal, close_error);
                 }
             } catch (const std::exception& exc) {
                 std::cerr << "Connection error: " << exc.what() << '\n';
@@ -319,6 +312,11 @@ int main(int argc, char** argv) {
                 }
                 ++conn_epoch;
                 conn_seq = 0;
+                last_depth_seq = 0;
+                have_depth_baseline = false;
+                book_out_of_sync = true;
+                order_book.bids.clear();
+                order_book.asks.clear();
                 std::cout << "Reconnecting in 2 seconds...\n";
                 std::this_thread::sleep_for(std::chrono::seconds(2));
                 if (g_stop_requested.load(std::memory_order_relaxed)) {

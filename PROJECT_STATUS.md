@@ -2,61 +2,41 @@
 
 ## Current phase
 
-Phase 1: project foundation and fail-first tests.
+Mandatory implementation complete; strict assignment-compliance audit in progress.
 
 ## Completed
 
-- Empty workspace confirmed.
-- Initial CMake project scaffold created.
-- Initial README.md created.
-- Initial PROJECT_STATUS.md created.
-- Initial order-book regression tests created to drive the implementation.
+- C++17/CMake Binance collector for Spot and USD-M combined streams.
+- Lowercase combined stream names and uppercase CSV symbol values.
+- Combined-envelope parsing and market-data CSV output of the inner payload.
+- Fixed-point order-book state and 26-column top-five CSV output.
+- Spot `U/u` and USD-M `U/u/pu` sequence validation; depth5 sequence baseline; reconnect resets the book and waits for refresh.
+- SIGINT/SIGTERM stop handling, synchronous CSV flushes, and WebSocket/TLS/socket RAII teardown.
+- Documentation now describes the actual CLI, schema, integer scales, timestamps, event mapping, reconnects, and limitations.
 
-## In progress
+## Verified
 
-- Implementing the core C++ order-book logic and Binance WebSocket collector.
+- Windows Release build with MSYS2 MinGW-w64 GCC 16.1.0 and C++17.
+- The project and registered test target compile in Release with assertions explicitly enabled for tests. CTest passed after the sequence tests were introduced; the latest expanded test binary could not be launched because Windows Application Control blocked it.
+- Earlier live Spot capture connected and produced trade, depth_diff, and depth5 rows; structural CSV inspection found 9 market-data columns and 26 order-book columns per row.
+- Offline sequence evaluation of that capture found 36 depth5 baselines, 36 depth diffs already covered by those baselines, and no gaps. Live Spot evidence predates the latest sequence/reconnect changes. Windows Application Control blocked launching the rebuilt collector during this audit, so current-source live behavior is not yet verified.
 
-## Not implemented yet
+## Current design
 
-- Binance TLS/WSS client
-- combined JSON parsing
-- market-data CSV writer
-- order-book CSV writer
-- real reconnect and graceful shutdown logic
-- live capture verification
+- Dependencies: Boost.Asio/Beast, OpenSSL, nlohmann/json, CMake.
+- Output: `market_data.csv` and `order_book.csv`, overwritten per run.
+- One symbol and one connection per run; `shard_id` is 0.
+- `conn_epoch` starts at 0 and advances after a connection failure; `conn_seq` restarts at 1 for each epoch.
+- Price and quantity scale: `100000000` (`10^8`) for both.
+- Timestamps: local `system_clock` wall time sampled immediately after `ws.read` completes; order-book rows reuse the corresponding event time.
+- Book: depth5 replaces the modeled top-five state; accepted depth diffs mutate price levels; zero quantity deletes; trades do not mutate the book.
+- Sequence gaps and reconnects suppress diffs until a depth5 refresh supplies a new baseline.
+- I/O: single-threaded blocking reads and synchronous writes with per-row flushes.
 
-## Important design decisions
+## Remaining verification
 
-- C++ standard: C++17
-- compiler: system default or g++-12 when available
-- dependencies: Boost.Asio/Beast, OpenSSL, nlohmann/json
-- timestamp policy: local wall-clock receive time
-- price scale: deterministic fixed-point integer scale
-- quantity scale: deterministic fixed-point integer scale
-- shard_id policy: 0 for the mandatory single-connection implementation
-- conn_epoch policy: starts at 0 and increments after reconnect
-- conn_seq policy: monotonic within each connection epoch
-- order-book semantics: depth updates modify bids and asks; trade events do not mutate the book
-- depth5 semantics: snapshot/refresh semantics handled separately from normal diff updates
-- trade semantics: written to market-data CSV only
-- sequence/gap policy: detect Binance depth gaps and stop applying diffs until a depth5 refresh
-- reconnect policy: reconnect after unexpected disconnect with backoff delay
-- CSV naming: market_data.csv and order_book.csv in the chosen output directory
-
-## Last known good build
-
-Not yet available.
-
-## Last known good run
-
-Not yet available.
-
-## Tests
-
-- Initial order-book regression tests added; implementation pending.
-
-## Known limitations
-
-- This is the mandatory single-symbol, single-connection version only.
-- No REST snapshot logic yet.
-- No optional features implemented.
+- Run the rebuilt executable through Windows Application Control and confirm live Spot event/order-book output after the latest sequence changes.
+- Verify a live USD-M connection and output.
+- Verify signal shutdown/reconnect behavior on the rebuilt executable and capture a 1–2 minute sample.
+- Run the latest expanded CTest binary in an environment where execution is permitted.
+- A complete REST snapshot/diff-buffer resynchronization is not implemented; this is outside the current mandatory implementation scope as treated by this project.

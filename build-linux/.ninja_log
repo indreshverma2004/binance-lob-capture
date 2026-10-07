@@ -1,0 +1,11 @@
+# ninja log v5
+42	11507	1791341281002414100	CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.o	e14baf4ee44eb64
+37	12309	1791341281816865800	CMakeFiles/binance_capture.dir/src/binance_capture.cpp.o	aa9f52a9e4823b86
+46	12492	1791341282001436800	CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.o	be8deb8dd11aca81
+12504	13838	1791341283355629000	order_book_tests	995e4ed2e3efa752
+33	37382	1791341306895442900	CMakeFiles/binance_capture.dir/src/main.cpp.o	4311db65e40200f2
+37604	39131	1791341308651829400	binance_capture	9c17ba93559e80f9
+96	5977	1791341456015334500	CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.o	e14baf4ee44eb64
+5990	6767	1791341456807799500	order_book_tests	995e4ed2e3efa752
+92	4617	1791341481966441400	CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.o	e14baf4ee44eb64
+4625	5403	1791341482753887700	order_book_tests	995e4ed2e3efa752
