@@ -1,19 +1,35 @@
-Start testing: Oct 07 04:37 UTC
+Start testing: Oct 07 04:52 UTC
 ----------------------------------------------------------
-1/1 Testing: order_book_tests
-1/1 Test: order_book_tests
+1/2 Testing: order_book_tests
+1/2 Test: order_book_tests
 Command: "/mnt/c/Users/HP/Desktop/assignment/build-linux/order_book_tests"
 Directory: /mnt/c/Users/HP/Desktop/assignment/build-linux
-"order_book_tests" start time: Oct 07 04:37 UTC
+"order_book_tests" start time: Oct 07 04:52 UTC
 Output:
 ----------------------------------------------------------
 order_book_tests passed
 <end of output>
-Test time =   0.01 sec
+Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"order_book_tests" end time: Oct 07 04:37 UTC
+"order_book_tests" end time: Oct 07 04:52 UTC
 "order_book_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Oct 07 04:37 UTC
+2/2 Testing: market_replay_tests
+2/2 Test: market_replay_tests
+Command: "/mnt/c/Users/HP/Desktop/assignment/build-linux/market_replay_tests"
+Directory: /mnt/c/Users/HP/Desktop/assignment/build-linux
+"market_replay_tests" start time: Oct 07 04:52 UTC
+Output:
+----------------------------------------------------------
+market_replay_tests passed
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"market_replay_tests" end time: Oct 07 04:52 UTC
+"market_replay_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Oct 07 04:52 UTC

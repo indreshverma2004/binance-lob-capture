@@ -65,6 +65,14 @@ build CMakeFiles/binance_capture.dir/src/binance_capture.cpp.o: CXX_COMPILER__bi
   OBJECT_DIR = CMakeFiles/binance_capture.dir
   OBJECT_FILE_DIR = CMakeFiles/binance_capture.dir/src
 
+build CMakeFiles/binance_capture.dir/src/market_replay.cpp.o: CXX_COMPILER__binance_capture_unscanned_Release /mnt/c/Users/HP/Desktop/assignment/src/market_replay.cpp || cmake_object_order_depends_target_binance_capture
+  DEFINES = -DBOOST_ATOMIC_DYN_LINK -DBOOST_ATOMIC_NO_LIB -DBOOST_SYSTEM_DYN_LINK -DBOOST_SYSTEM_NO_LIB -DBOOST_THREAD_DYN_LINK -DBOOST_THREAD_NO_LIB
+  DEP_FILE = CMakeFiles/binance_capture.dir/src/market_replay.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2
+  INCLUDES = -I/mnt/c/Users/HP/Desktop/assignment/include
+  OBJECT_DIR = CMakeFiles/binance_capture.dir
+  OBJECT_FILE_DIR = CMakeFiles/binance_capture.dir/src
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target binance_capture
@@ -73,7 +81,7 @@ build CMakeFiles/binance_capture.dir/src/binance_capture.cpp.o: CXX_COMPILER__bi
 #############################################
 # Link the executable binance_capture
 
-build binance_capture: CXX_EXECUTABLE_LINKER__binance_capture_Release CMakeFiles/binance_capture.dir/src/main.cpp.o CMakeFiles/binance_capture.dir/src/binance_capture.cpp.o | /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
+build binance_capture: CXX_EXECUTABLE_LINKER__binance_capture_Release CMakeFiles/binance_capture.dir/src/main.cpp.o CMakeFiles/binance_capture.dir/src/binance_capture.cpp.o CMakeFiles/binance_capture.dir/src/market_replay.cpp.o | /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
   FLAGS = -O3 -DNDEBUG
   LINK_LIBRARIES = /usr/lib/x86_64-linux-gnu/libssl.so  /usr/lib/x86_64-linux-gnu/libcrypto.so  /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0  /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0  /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
   OBJECT_DIR = CMakeFiles/binance_capture.dir
@@ -107,6 +115,14 @@ build CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.o: CXX_COMPILER__o
   OBJECT_DIR = CMakeFiles/order_book_tests.dir
   OBJECT_FILE_DIR = CMakeFiles/order_book_tests.dir/src
 
+build CMakeFiles/order_book_tests.dir/src/market_replay.cpp.o: CXX_COMPILER__order_book_tests_unscanned_Release /mnt/c/Users/HP/Desktop/assignment/src/market_replay.cpp || cmake_object_order_depends_target_order_book_tests
+  DEFINES = -DBOOST_ATOMIC_DYN_LINK -DBOOST_ATOMIC_NO_LIB -DBOOST_SYSTEM_DYN_LINK -DBOOST_SYSTEM_NO_LIB -DBOOST_THREAD_DYN_LINK -DBOOST_THREAD_NO_LIB
+  DEP_FILE = CMakeFiles/order_book_tests.dir/src/market_replay.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2 -UNDEBUG
+  INCLUDES = -I/mnt/c/Users/HP/Desktop/assignment/include
+  OBJECT_DIR = CMakeFiles/order_book_tests.dir
+  OBJECT_FILE_DIR = CMakeFiles/order_book_tests.dir/src
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target order_book_tests
@@ -115,7 +131,7 @@ build CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.o: CXX_COMPILER__o
 #############################################
 # Link the executable order_book_tests
 
-build order_book_tests: CXX_EXECUTABLE_LINKER__order_book_tests_Release CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.o CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.o | /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
+build order_book_tests: CXX_EXECUTABLE_LINKER__order_book_tests_Release CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.o CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.o CMakeFiles/order_book_tests.dir/src/market_replay.cpp.o | /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
   FLAGS = -O3 -DNDEBUG
   LINK_LIBRARIES = /usr/lib/x86_64-linux-gnu/libssl.so  /usr/lib/x86_64-linux-gnu/libcrypto.so  /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0  /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0  /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
   OBJECT_DIR = CMakeFiles/order_book_tests.dir
@@ -123,6 +139,56 @@ build order_book_tests: CXX_EXECUTABLE_LINKER__order_book_tests_Release CMakeFil
   PRE_LINK = :
   TARGET_FILE = order_book_tests
   TARGET_PDB = order_book_tests.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target market_replay_tests
+
+
+#############################################
+# Order-only phony target for market_replay_tests
+
+build cmake_object_order_depends_target_market_replay_tests: phony || CMakeFiles/market_replay_tests.dir
+
+build CMakeFiles/market_replay_tests.dir/tests/test_replay.cpp.o: CXX_COMPILER__market_replay_tests_unscanned_Release /mnt/c/Users/HP/Desktop/assignment/tests/test_replay.cpp || cmake_object_order_depends_target_market_replay_tests
+  DEFINES = -DBOOST_ATOMIC_DYN_LINK -DBOOST_ATOMIC_NO_LIB -DBOOST_SYSTEM_DYN_LINK -DBOOST_SYSTEM_NO_LIB -DBOOST_THREAD_DYN_LINK -DBOOST_THREAD_NO_LIB
+  DEP_FILE = CMakeFiles/market_replay_tests.dir/tests/test_replay.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2 -UNDEBUG
+  INCLUDES = -I/mnt/c/Users/HP/Desktop/assignment/include
+  OBJECT_DIR = CMakeFiles/market_replay_tests.dir
+  OBJECT_FILE_DIR = CMakeFiles/market_replay_tests.dir/tests
+
+build CMakeFiles/market_replay_tests.dir/src/binance_capture.cpp.o: CXX_COMPILER__market_replay_tests_unscanned_Release /mnt/c/Users/HP/Desktop/assignment/src/binance_capture.cpp || cmake_object_order_depends_target_market_replay_tests
+  DEFINES = -DBOOST_ATOMIC_DYN_LINK -DBOOST_ATOMIC_NO_LIB -DBOOST_SYSTEM_DYN_LINK -DBOOST_SYSTEM_NO_LIB -DBOOST_THREAD_DYN_LINK -DBOOST_THREAD_NO_LIB
+  DEP_FILE = CMakeFiles/market_replay_tests.dir/src/binance_capture.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2 -UNDEBUG
+  INCLUDES = -I/mnt/c/Users/HP/Desktop/assignment/include
+  OBJECT_DIR = CMakeFiles/market_replay_tests.dir
+  OBJECT_FILE_DIR = CMakeFiles/market_replay_tests.dir/src
+
+build CMakeFiles/market_replay_tests.dir/src/market_replay.cpp.o: CXX_COMPILER__market_replay_tests_unscanned_Release /mnt/c/Users/HP/Desktop/assignment/src/market_replay.cpp || cmake_object_order_depends_target_market_replay_tests
+  DEFINES = -DBOOST_ATOMIC_DYN_LINK -DBOOST_ATOMIC_NO_LIB -DBOOST_SYSTEM_DYN_LINK -DBOOST_SYSTEM_NO_LIB -DBOOST_THREAD_DYN_LINK -DBOOST_THREAD_NO_LIB
+  DEP_FILE = CMakeFiles/market_replay_tests.dir/src/market_replay.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O2 -UNDEBUG
+  INCLUDES = -I/mnt/c/Users/HP/Desktop/assignment/include
+  OBJECT_DIR = CMakeFiles/market_replay_tests.dir
+  OBJECT_FILE_DIR = CMakeFiles/market_replay_tests.dir/src
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target market_replay_tests
+
+
+#############################################
+# Link the executable market_replay_tests
+
+build market_replay_tests: CXX_EXECUTABLE_LINKER__market_replay_tests_Release CMakeFiles/market_replay_tests.dir/tests/test_replay.cpp.o CMakeFiles/market_replay_tests.dir/src/binance_capture.cpp.o CMakeFiles/market_replay_tests.dir/src/market_replay.cpp.o | /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0 /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
+  FLAGS = -O3 -DNDEBUG
+  LINK_LIBRARIES = /usr/lib/x86_64-linux-gnu/libssl.so  /usr/lib/x86_64-linux-gnu/libcrypto.so  /usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0  /usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0  /usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0
+  OBJECT_DIR = CMakeFiles/market_replay_tests.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = market_replay_tests
+  TARGET_PDB = market_replay_tests.dbg
 
 
 #############################################
@@ -170,7 +236,7 @@ build rebuild_cache: phony CMakeFiles/rebuild_cache.util
 #############################################
 # Folder: /mnt/c/Users/HP/Desktop/assignment/build-linux
 
-build all: phony binance_capture order_book_tests
+build all: phony binance_capture order_book_tests market_replay_tests
 
 # =============================================================================
 # Built-in targets

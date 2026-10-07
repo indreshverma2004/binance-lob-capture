@@ -117,15 +117,31 @@ Timestamps use local `std::chrono::system_clock` wall time sampled immediately a
 
 Socket reads and CSV writes are synchronous on one thread. Each market row and emitted book row is flushed immediately; disk latency can therefore block message processing. SIGINT/SIGTERM set a stop flag. After the blocking read returns, the client attempts a normal WebSocket close and closes both CSV files. RAII owns the WebSocket, TLS stream, socket, and I/O context.
 
-The local book is a top-five model, not a complete exchange book. There is no REST snapshot plus diff-buffer resynchronization, replay mode, multi-symbol support, or sharding. A replay mode is not provided, so deterministic end-to-end regeneration from a saved fixed input has not been verified. Gap recovery and reconnect recovery are implemented/documented but were not dynamically exercised in the final captures.
+The local book is a top-five model, not a complete exchange book. There is no REST snapshot plus diff-buffer resynchronization, multi-symbol support, or sharding. Gap recovery and reconnect recovery are implemented/documented but were not dynamically exercised in the final captures.
+
+## Optional / Stretch Features
+
+### Replay Mode
+
+Replay mode is an optional local-review feature for regenerating order-book rows from a captured market-data CSV without contacting Binance. It shares the same normalized event processor, order-book logic, fixed-point parser, and sequence handling used by live capture.
+
+```bash
+./build-linux/binance_capture --replay ./output-linux-90s/market_data.csv --output-dir ./replay-output
+```
+
+The input must use the exact 9-column market-data header and contain one venue, symbol, and shard, with contiguous `conn_seq` values within each increasing `conn_epoch`. RFC4180 quoting is parsed and unescaped before `payload_json` is parsed. Invalid headers, CSV fields, JSON, timestamps, sequence metadata, stream kinds, and depth numerics fail with the input row number where available.
+
+Replay performs no DNS, TLS, or WebSocket operations. It writes only `order_book.csv` in the requested directory and does not copy or rewrite `market_data.csv`. The output directory must be separate from the input directory, and replay refuses to overwrite an existing `order_book.csv`. Book timestamps are copied from each recorded market event; replay never substitutes the current clock. Events remain in file order, trades do not modify the book, and a connection-epoch change resets book/baseline state while `seqNo` remains monotonic.
+
+Validation used `output-linux-90s/market_data.csv`: 3,980 input events (846 depth diffs, 846 depth5, 2,288 trades), 846 output order-book rows, 0 applied diffs, 846 stale diffs, 0 gaps, and 0 rejected records. Replay output matched the original Spot `order_book.csv` byte-for-byte. Two independent replays also matched byte-for-byte (SHA-256 `b3732c1ecd0b01928e8a82b2c32756beded838d0e0185f233525b50037e1d4bb`). Automated tests cover deterministic replay, escaped JSON, snapshot/diff/trade behavior, recorded timestamps, epoch sequence preservation, and malformed input rejection.
 
 ## Validation
 
-The final Linux/WSL build used GCC 13.3.0 and CMake 3.28.3. The clean Release build completed with `-Wall -Wextra`; CTest passed 1/1 and the test executable passed directly.
+The final Linux/WSL build used GCC 13.3.0 and CMake 3.28.3. The clean Release build completed with `-Wall -Wextra`; CTest passed 2/2, including the replay tests, and both test executables passed directly.
 
 Spot capture: `output-linux-90s/` contains the latest paired BTCUSDT run made with a 90-second limit. Its event timestamps span 84.245585 seconds; three receive timestamps moved backward by approximately 1.4–1.6 seconds, while `conn_seq` remained ordered. It recorded 3,980 market rows: 2,288 trades, 846 depth5 events, and 846 depth diffs; 846 order-book rows were replay-checked. All three stream types arrived, CSV/JSON schemas validated, and every order-book row matched its depth5 source snapshot. All 846 diffs were stale against the latest snapshot baseline, so this capture did not demonstrate applied Spot diffs or deletions. No gaps or reconnects occurred.
 
-USD-M capture: `output-usdm/` contains a paired approximately 24-second BTCUSDT run. It recorded 980 market rows: 238 depth diffs, 231 depth5 events, and 511 trades; 466 order-book rows replay-matched. The replay found 235 applied diffs, 3 stale diffs, and no gaps. It observed 1,750 zero-quantity updates, of which 5 removed existing modeled levels. All three streams arrived; schemas, timestamps, ordering, fixed-point values, and replay consistency validated. No reconnect occurred.
+Earlier USD-M live validation (the `output-usdm/` CSV artifacts are not present in the current workspace) recorded approximately 24 seconds of BTCUSDT data: 980 market rows (238 depth diffs, 231 depth5 events, 511 trades), 466 replay-matched order-book rows, 235 applied diffs, 3 stale diffs, 0 gaps, 1,750 zero-quantity updates, and 5 modeled-level removals. No reconnect occurred. These figures are prior live-validation results, not a replay run from the current workspace.
 
 ## GitHub Submission
 

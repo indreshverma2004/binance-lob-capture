@@ -1,4 +1,5 @@
 #include "binance_capture.hpp"
+#include "market_replay.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -33,7 +34,17 @@ void signalHandler(int) {
 }
 
 std::string usage() {
-    return "Usage: binance_capture --venue spot|usdm --symbols SYMBOL --output-dir PATH";
+    return "Usage: binance_capture --venue spot|usdm --symbols SYMBOL --output-dir PATH\n"
+           "   or: binance_capture --replay MARKET_CSV --output-dir PATH";
+}
+
+bool hasArg(int argc, char** argv, const std::string& key) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == key) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string readArg(int argc, char** argv, const std::string& key) {
@@ -72,29 +83,6 @@ nlohmann::json parseJsonOrThrow(const std::string& raw) {
     }
 }
 
-std::vector<binance_capture::DepthLevel> parseDepthArray(const nlohmann::json& value, const std::string& field_name) {
-    std::vector<binance_capture::DepthLevel> result;
-    if (!value.contains(field_name)) {
-        return result;
-    }
-    const auto& array = value[field_name];
-    if (!array.is_array()) {
-        throw std::runtime_error("Malformed Binance depth array for " + field_name);
-    }
-    for (const auto& item : array) {
-        if (!item.is_array() || item.size() < 2) {
-            throw std::runtime_error("Depth array item missing required price/quantity fields");
-        }
-        std::string price_text = item[0].get<std::string>();
-        std::string qty_text = item[1].get<std::string>();
-        result.push_back({
-            binance_capture::scaledIntegerFromString(price_text, binance_capture::PRICE_SCALE, field_name + ".price"),
-            binance_capture::scaledIntegerFromString(qty_text, binance_capture::QTY_SCALE, field_name + ".qty")
-        });
-    }
-    return result;
-}
-
 void writeMarketDataRow(std::ofstream& market_csv,
                         const std::string& venue,
                         const std::string& stream_kind,
@@ -118,36 +106,61 @@ void writeMarketDataRow(std::ofstream& market_csv,
                << '\n';
 }
 
-void writeOrderBookRow(std::ofstream& orderbook_csv,
-                       const binance_capture::OrderBook& book,
-                       int64_t tsec,
-                       int32_t tnsec,
-                       uint64_t seqNo,
-                       int32_t id,
-                       char type,
-                       char side) {
-    const auto top = book.topFive();
-    orderbook_csv << tsec << ',' << tnsec << ',' << seqNo << ',' << id << ',' << type << ',' << side;
-    for (int i = 0; i < 5; ++i) {
-        orderbook_csv << ',' << top.bid_prices[i];
-    }
-    for (int i = 0; i < 5; ++i) {
-        orderbook_csv << ',' << top.bid_sizes[i];
-    }
-    for (int i = 0; i < 5; ++i) {
-        orderbook_csv << ',' << top.ask_prices[i];
-    }
-    for (int i = 0; i < 5; ++i) {
-        orderbook_csv << ',' << top.ask_sizes[i];
-    }
-    orderbook_csv << '\n';
-}
-
 int main(int argc, char** argv) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
     try {
+        if (hasArg(argc, argv, "--replay")) {
+            if (hasArg(argc, argv, "--venue") || hasArg(argc, argv, "--symbols")) {
+                throw std::invalid_argument("--replay cannot be combined with --venue or --symbols");
+            }
+            const std::string replay_path = readArg(argc, argv, "--replay");
+            const std::string output_dir_arg = readArg(argc, argv, "--output-dir");
+            if (replay_path.empty() || replay_path.rfind("--", 0) == 0) {
+                throw std::invalid_argument("--replay requires a market_data.csv path");
+            }
+            if (output_dir_arg.empty()) {
+                throw std::invalid_argument("--output-dir is required with --replay");
+            }
+
+            std::ifstream market_csv(replay_path, std::ios::in | std::ios::binary);
+            if (!market_csv) {
+                throw std::runtime_error("unable to open replay input: " + replay_path);
+            }
+            const auto input_path = std::filesystem::weakly_canonical(replay_path);
+            std::filesystem::create_directories(output_dir_arg);
+            const auto output_dir = std::filesystem::weakly_canonical(output_dir_arg);
+            if (input_path.parent_path() == output_dir) {
+                throw std::invalid_argument("replay output must use a directory separate from the input capture");
+            }
+            const auto orderbook_path = output_dir / "order_book.csv";
+            if (std::filesystem::exists(orderbook_path)) {
+                throw std::runtime_error("replay output already exists; choose an unused output directory: " + orderbook_path.string());
+            }
+            std::ofstream orderbook_csv(orderbook_path, std::ios::out | std::ios::binary);
+            if (!orderbook_csv) {
+                throw std::runtime_error("unable to create replay order_book.csv: " + orderbook_path.string());
+            }
+
+            const auto stats = binance_capture::replayMarketDataCsv(market_csv, orderbook_csv);
+            orderbook_csv.flush();
+            if (!orderbook_csv) {
+                throw std::runtime_error("failed flushing replay order_book.csv");
+            }
+            std::cout << "Replay complete: market_events=" << stats.market_events
+                      << " depth_diff=" << stats.depth_diff_events
+                      << " depth5=" << stats.depth5_events
+                      << " trade=" << stats.trade_events
+                      << " applied_diff=" << stats.applied_diff_events
+                      << " stale_diff=" << stats.stale_diff_events
+                      << " gaps=" << stats.gap_events
+                      << " ignored_out_of_sync=" << stats.ignored_out_of_sync_events
+                      << " order_book_rows=" << stats.order_book_rows
+                      << " rejected=0 output=" << orderbook_path.string() << '\n';
+            return 0;
+        }
+
         const std::string venue_arg = readArg(argc, argv, "--venue");
         const std::string symbols_arg = readArg(argc, argv, "--symbols");
         const std::string output_dir_arg = readArg(argc, argv, "--output-dir");
@@ -185,18 +198,13 @@ int main(int argc, char** argv) {
             std::cerr << "Unable to open order_book.csv for writing: " << orderbook_path << '\n';
             return 1;
         }
-        orderbook_csv << binance_capture::buildOrderBookHeader() << '\n';
+        binance_capture::writeOrderBookCsvHeader(orderbook_csv);
 
         std::cout << "Starting Binance capture for venue=" << venue << " symbol=" << symbol << " output_dir=" << output_dir_arg << '\n';
 
         uint64_t conn_epoch = 0;
         uint64_t conn_seq = 0;
-        uint64_t orderbook_seq = 0;
-        uint64_t last_depth_seq = 0;
-        bool have_depth_baseline = false;
-        bool initial_depth_diff_pending = false;
-        bool book_out_of_sync = true;
-        binance_capture::OrderBook order_book;
+        binance_capture::OrderBookProcessor orderbook_processor(venue, symbol);
 
         while (!g_stop_requested.load(std::memory_order_relaxed)) {
             try {
@@ -268,40 +276,24 @@ int main(int argc, char** argv) {
                     writeMarketDataRow(market_csv, venue, stream_kind, 0, conn_epoch, conn_seq, symbol, payload, recv_tsec, recv_tnsec);
                     market_csv.flush();
 
-                    if (stream_kind == "depth_diff") {
-                        const auto bid_levels = parseDepthArray(payload, "b");
-                        const auto ask_levels = parseDepthArray(payload, "a");
-                        if (book_out_of_sync || !have_depth_baseline) {
-                            continue;
-                        }
-                        const auto sequence_status = binance_capture::applyDepthSequence(venue, payload, last_depth_seq, initial_depth_diff_pending);
-                        if (sequence_status == binance_capture::DepthSequenceStatus::gap) {
-                            book_out_of_sync = true;
-                            have_depth_baseline = false;
-                            initial_depth_diff_pending = false;
-                            std::cerr << "Depth sequence gap; waiting for depth5 refresh.\n";
-                            continue;
-                        }
-                        if (sequence_status == binance_capture::DepthSequenceStatus::stale) {
-                            continue;
-                        }
-                        order_book.applyDepthDiff(bid_levels, ask_levels);
-                        ++orderbook_seq;
-                        writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, static_cast<int32_t>(binance_capture::stableInstrumentId(symbol)), 'D', 'N');
+                    const binance_capture::NormalizedMarketEvent event{
+                        recv_tsec,
+                        recv_tnsec,
+                        venue,
+                        stream_kind,
+                        0,
+                        static_cast<int64_t>(conn_epoch),
+                        conn_seq,
+                        symbol,
+                        payload
+                    };
+                    const auto processed = orderbook_processor.process(event);
+                    if (processed.disposition == binance_capture::EventDisposition::gap) {
+                        std::cerr << "Depth sequence gap; waiting for depth5 refresh.\n";
+                    }
+                    if (processed.order_book_row) {
+                        binance_capture::writeOrderBookCsvRow(orderbook_csv, *processed.order_book_row);
                         orderbook_csv.flush();
-                    } else if (stream_kind == "depth5") {
-                        const auto bid_levels = parseDepthArray(payload, venue == "spot" ? "bids" : "b");
-                        const auto ask_levels = parseDepthArray(payload, venue == "spot" ? "asks" : "a");
-                        order_book.applyDepth5(bid_levels, ask_levels);
-                        last_depth_seq = binance_capture::depthSnapshotUpdateId(venue, payload);
-                        have_depth_baseline = true;
-                        initial_depth_diff_pending = true;
-                        book_out_of_sync = false;
-                        ++orderbook_seq;
-                        writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, static_cast<int32_t>(binance_capture::stableInstrumentId(symbol)), 'S', 'N');
-                        orderbook_csv.flush();
-                    } else if (stream_kind == "trade") {
-                        // Trade events are written to market_data.csv only and do not modify the local book.
                     }
                 }
                 if (g_stop_requested.load(std::memory_order_relaxed)) {
@@ -315,12 +307,7 @@ int main(int argc, char** argv) {
                 }
                 ++conn_epoch;
                 conn_seq = 0;
-                last_depth_seq = 0;
-                have_depth_baseline = false;
-                initial_depth_diff_pending = false;
-                book_out_of_sync = true;
-                order_book.bids.clear();
-                order_book.asks.clear();
+                orderbook_processor.reset();
                 std::cout << "Reconnecting in 2 seconds...\n";
                 std::this_thread::sleep_for(std::chrono::seconds(2));
                 if (g_stop_requested.load(std::memory_order_relaxed)) {

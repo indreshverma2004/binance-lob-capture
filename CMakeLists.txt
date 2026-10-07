@@ -18,24 +18,32 @@ find_package(nlohmann_json 3.2 REQUIRED)
 
 include_directories(include)
 
-add_executable(binance_capture src/main.cpp src/binance_capture.cpp)
+add_executable(binance_capture src/main.cpp src/binance_capture.cpp src/market_replay.cpp)
 target_include_directories(binance_capture PRIVATE include)
 target_link_libraries(binance_capture PRIVATE OpenSSL::SSL OpenSSL::Crypto Boost::system Boost::thread nlohmann_json::nlohmann_json)
 
-add_executable(order_book_tests tests/test_order_book.cpp src/binance_capture.cpp)
+add_executable(order_book_tests tests/test_order_book.cpp src/binance_capture.cpp src/market_replay.cpp)
 target_include_directories(order_book_tests PRIVATE include)
 target_link_libraries(order_book_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto Boost::system Boost::thread nlohmann_json::nlohmann_json)
+
+add_executable(market_replay_tests tests/test_replay.cpp src/binance_capture.cpp src/market_replay.cpp)
+target_include_directories(market_replay_tests PRIVATE include)
+target_link_libraries(market_replay_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto Boost::system Boost::thread nlohmann_json::nlohmann_json)
 
 if(WIN32)
   target_link_libraries(binance_capture PRIVATE ws2_32)
   target_link_libraries(order_book_tests PRIVATE ws2_32)
+  target_link_libraries(market_replay_tests PRIVATE ws2_32)
 endif()
 
 if(MSVC)
   target_compile_options(order_book_tests PRIVATE /UNDEBUG)
+  target_compile_options(market_replay_tests PRIVATE /UNDEBUG)
 else()
   target_compile_options(order_book_tests PRIVATE -UNDEBUG)
+  target_compile_options(market_replay_tests PRIVATE -UNDEBUG)
 endif()
 
 enable_testing()
 add_test(NAME order_book_tests COMMAND order_book_tests)
+add_test(NAME market_replay_tests COMMAND market_replay_tests)
