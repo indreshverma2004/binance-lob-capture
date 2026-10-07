@@ -68,18 +68,27 @@ int main() {
     assert(binance_capture::classifyStream("btcusdt@depth5@100ms") == "depth5");
     assert(binance_capture::classifyStream("btcusdt@trade") == "trade");
 
-    uint64_t spot_update_id = binance_capture::depthSnapshotUpdateId({{"lastUpdateId", 100}});
-    assert(binance_capture::applyDepthSequence("spot", {{"U", 101}, {"u", 102}}, spot_update_id) == binance_capture::DepthSequenceStatus::applied);
+    uint64_t spot_update_id = binance_capture::depthSnapshotUpdateId("spot", {{"lastUpdateId", 100}});
+    bool spot_initial_update_pending = true;
+    assert(binance_capture::applyDepthSequence("spot", {{"U", 101}, {"u", 102}}, spot_update_id, spot_initial_update_pending) == binance_capture::DepthSequenceStatus::applied);
     assert(spot_update_id == 102);
-    assert(binance_capture::applyDepthSequence("spot", {{"U", 102}, {"u", 104}}, spot_update_id) == binance_capture::DepthSequenceStatus::applied);
+    assert(binance_capture::applyDepthSequence("spot", {{"U", 102}, {"u", 104}}, spot_update_id, spot_initial_update_pending) == binance_capture::DepthSequenceStatus::applied);
     assert(spot_update_id == 104);
-    assert(binance_capture::applyDepthSequence("spot", {{"U", 101}, {"u", 102}}, spot_update_id) == binance_capture::DepthSequenceStatus::stale);
-    assert(binance_capture::applyDepthSequence("spot", {{"U", 106}, {"u", 107}}, spot_update_id) == binance_capture::DepthSequenceStatus::gap);
+    assert(binance_capture::applyDepthSequence("spot", {{"U", 101}, {"u", 102}}, spot_update_id, spot_initial_update_pending) == binance_capture::DepthSequenceStatus::stale);
+    assert(binance_capture::applyDepthSequence("spot", {{"U", 106}, {"u", 107}}, spot_update_id, spot_initial_update_pending) == binance_capture::DepthSequenceStatus::gap);
 
     uint64_t usdm_update_id = 200;
-    assert(binance_capture::applyDepthSequence("usdm", {{"U", 201}, {"u", 202}, {"pu", 200}}, usdm_update_id) == binance_capture::DepthSequenceStatus::applied);
-    assert(usdm_update_id == 202);
-    assert(binance_capture::applyDepthSequence("usdm", {{"U", 203}, {"u", 204}, {"pu", 201}}, usdm_update_id) == binance_capture::DepthSequenceStatus::gap);
+    assert(binance_capture::depthSnapshotUpdateId("usdm", {{"U", 200}, {"u", 205}, {"pu", 199}}) == 205);
+    bool usdm_initial_update_pending = true;
+    assert(binance_capture::applyDepthSequence("usdm", {{"U", 190}, {"u", 205}, {"pu", 189}}, usdm_update_id, usdm_initial_update_pending) == binance_capture::DepthSequenceStatus::applied);
+    assert(usdm_update_id == 205);
+    assert(!usdm_initial_update_pending);
+    assert(binance_capture::applyDepthSequence("usdm", {{"U", 206}, {"u", 210}, {"pu", 205}}, usdm_update_id, usdm_initial_update_pending) == binance_capture::DepthSequenceStatus::applied);
+    assert(usdm_update_id == 210);
+    assert(binance_capture::applyDepthSequence("usdm", {{"U", 211}, {"u", 214}, {"pu", 210}}, usdm_update_id, usdm_initial_update_pending) == binance_capture::DepthSequenceStatus::applied);
+    assert(usdm_update_id == 214);
+    assert(binance_capture::applyDepthSequence("usdm", {{"U", 210}, {"u", 214}, {"pu", 205}}, usdm_update_id, usdm_initial_update_pending) == binance_capture::DepthSequenceStatus::stale);
+    assert(binance_capture::applyDepthSequence("usdm", {{"U", 215}, {"u", 220}, {"pu", 209}}, usdm_update_id, usdm_initial_update_pending) == binance_capture::DepthSequenceStatus::gap);
 
     std::cout << "order_book_tests passed\n";
     return 0;

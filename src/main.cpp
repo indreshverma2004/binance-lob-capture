@@ -194,6 +194,7 @@ int main(int argc, char** argv) {
         uint64_t orderbook_seq = 0;
         uint64_t last_depth_seq = 0;
         bool have_depth_baseline = false;
+        bool initial_depth_diff_pending = false;
         bool book_out_of_sync = true;
         binance_capture::OrderBook order_book;
 
@@ -273,10 +274,11 @@ int main(int argc, char** argv) {
                         if (book_out_of_sync || !have_depth_baseline) {
                             continue;
                         }
-                        const auto sequence_status = binance_capture::applyDepthSequence(venue, payload, last_depth_seq);
+                        const auto sequence_status = binance_capture::applyDepthSequence(venue, payload, last_depth_seq, initial_depth_diff_pending);
                         if (sequence_status == binance_capture::DepthSequenceStatus::gap) {
                             book_out_of_sync = true;
                             have_depth_baseline = false;
+                            initial_depth_diff_pending = false;
                             std::cerr << "Depth sequence gap; waiting for depth5 refresh.\n";
                             continue;
                         }
@@ -288,11 +290,12 @@ int main(int argc, char** argv) {
                         writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, static_cast<int32_t>(binance_capture::stableInstrumentId(symbol)), 'D', 'N');
                         orderbook_csv.flush();
                     } else if (stream_kind == "depth5") {
-                        const auto bid_levels = parseDepthArray(payload, "bids");
-                        const auto ask_levels = parseDepthArray(payload, "asks");
+                        const auto bid_levels = parseDepthArray(payload, venue == "spot" ? "bids" : "b");
+                        const auto ask_levels = parseDepthArray(payload, venue == "spot" ? "asks" : "a");
                         order_book.applyDepth5(bid_levels, ask_levels);
-                        last_depth_seq = binance_capture::depthSnapshotUpdateId(payload);
+                        last_depth_seq = binance_capture::depthSnapshotUpdateId(venue, payload);
                         have_depth_baseline = true;
+                        initial_depth_diff_pending = true;
                         book_out_of_sync = false;
                         ++orderbook_seq;
                         writeOrderBookRow(orderbook_csv, order_book, recv_tsec, recv_tnsec, orderbook_seq, static_cast<int32_t>(binance_capture::stableInstrumentId(symbol)), 'S', 'N');
@@ -314,6 +317,7 @@ int main(int argc, char** argv) {
                 conn_seq = 0;
                 last_depth_seq = 0;
                 have_depth_baseline = false;
+                initial_depth_diff_pending = false;
                 book_out_of_sync = true;
                 order_book.bids.clear();
                 order_book.asks.clear();

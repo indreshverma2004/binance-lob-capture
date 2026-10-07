@@ -64,10 +64,11 @@ std::string buildOrderBookHeader();
 std::string compactJson(const nlohmann::json& value);
 int64_t scaledIntegerFromString(const std::string& text, int64_t scale, const std::string& label);
 uint32_t stableInstrumentId(const std::string& symbol);
-uint64_t depthSnapshotUpdateId(const nlohmann::json& payload);
+uint64_t depthSnapshotUpdateId(const std::string& venue, const nlohmann::json& payload);
 DepthSequenceStatus applyDepthSequence(const std::string& venue,
                                        const nlohmann::json& payload,
-                                       uint64_t& last_update_id);
+                                       uint64_t& last_update_id,
+                                       bool& initial_update_pending);
 
 class OrderBook {
 public:

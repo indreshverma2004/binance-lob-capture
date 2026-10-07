@@ -188,17 +188,35 @@ uint32_t stableInstrumentId(const std::string& symbol) {
     return hash % 2147483647u;
 }
 
-uint64_t depthSnapshotUpdateId(const nlohmann::json& payload) {
-    return sequenceValue(payload, "lastUpdateId");
+uint64_t depthSnapshotUpdateId(const std::string& venue, const nlohmann::json& payload) {
+    if (venue == "spot") {
+        return sequenceValue(payload, "lastUpdateId");
+    }
+    if (venue == "usdm") {
+        const uint64_t first_update_id = sequenceValue(payload, "U");
+        const uint64_t final_update_id = sequenceValue(payload, "u");
+        if (first_update_id > final_update_id) {
+            throw std::invalid_argument("depth5 snapshot has an invalid U/u range");
+        }
+        return final_update_id;
+    }
+    throw std::invalid_argument("venue must be spot or usdm");
 }
 
 DepthSequenceStatus applyDepthSequence(const std::string& venue,
                                        const nlohmann::json& payload,
-                                       uint64_t& last_update_id) {
+                                       uint64_t& last_update_id,
+                                       bool& initial_update_pending) {
     const uint64_t first_update_id = sequenceValue(payload, "U");
     const uint64_t final_update_id = sequenceValue(payload, "u");
     if (first_update_id > final_update_id) {
         throw std::invalid_argument("depth event has an invalid U/u range");
+    }
+    uint64_t previous_update_id = 0;
+    if (venue == "usdm") {
+        previous_update_id = sequenceValue(payload, "pu");
+    } else if (venue != "spot") {
+        throw std::invalid_argument("venue must be spot or usdm");
     }
     if (final_update_id <= last_update_id) {
         return DepthSequenceStatus::stale;
@@ -209,15 +227,19 @@ DepthSequenceStatus applyDepthSequence(const std::string& venue,
             first_update_id > last_update_id + 1) {
             return DepthSequenceStatus::gap;
         }
-    } else if (venue == "usdm") {
-        if (sequenceValue(payload, "pu") != last_update_id) {
+    } else {
+        const bool follows_previous_event = previous_update_id == last_update_id;
+        const bool bridges_snapshot = initial_update_pending &&
+                                      previous_update_id < last_update_id &&
+                                      last_update_id != std::numeric_limits<uint64_t>::max() &&
+                                      first_update_id <= last_update_id + 1;
+        if (!follows_previous_event && !bridges_snapshot) {
             return DepthSequenceStatus::gap;
         }
-    } else {
-        throw std::invalid_argument("venue must be spot or usdm");
     }
 
     last_update_id = final_update_id;
+    initial_update_pending = false;
     return DepthSequenceStatus::applied;
 }
 
