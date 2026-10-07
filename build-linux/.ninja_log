@@ -18,3 +18,10 @@
 8374	9327	1791342657485147300	order_book_tests	995e4ed2e3efa752
 76	28462	1791342676624066700	CMakeFiles/binance_capture.dir/src/main.cpp.o	4311db65e40200f2
 28470	30529	1791342678698484500	binance_capture	9c17ba93559e80f9
+44	86	0	clean	a31eedcededa8236
+87	11225	1791347355744572800	CMakeFiles/order_book_tests.dir/tests/test_order_book.cpp.o	e14baf4ee44eb64
+83	11341	1791347355868118700	CMakeFiles/binance_capture.dir/src/binance_capture.cpp.o	aa9f52a9e4823b86
+95	11445	1791347355963419200	CMakeFiles/order_book_tests.dir/src/binance_capture.cpp.o	be8deb8dd11aca81
+11684	14302	1791347358705237000	order_book_tests	995e4ed2e3efa752
+81	34223	1791347379078981000	CMakeFiles/binance_capture.dir/src/main.cpp.o	4311db65e40200f2
+34232	37149	1791347381812609200	binance_capture	9c17ba93559e80f9

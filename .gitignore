@@ -1,0 +1,15 @@
+/build/
+/build-linux/
+/output/
+/output-linux/
+/output-usdm/
+/ssl_test.cpp
+/test.cpp
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+.env
+/config/secrets.json

@@ -1,2 +1,2 @@
-order_book_tests 4 0.00616373
+order_book_tests 6 0.00245464
 ---
