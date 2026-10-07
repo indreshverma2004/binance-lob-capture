@@ -108,16 +108,16 @@ Timestamps use local `std::chrono::system_clock` wall time sampled immediately a
 ## Differential Sequence and Reconnect Policy
 
 - Spot depth diffs validate `U <= u`. Events with `u` no newer than the current baseline are stale and ignored. A diff is accepted when its `U` range covers the next expected update; `U > last_update_id + 1` is a gap.
-- USD-M depth5 uses its `b`/`a` partial levels and `u` as the snapshot baseline. Spot depth5 uses `bids`/`asks` and `lastUpdateId`.
+- Spot depth5 uses `bids`/`asks` and `lastUpdateId`; USD-M depth5 uses `b`/`a` and `u`. In replay mode, depth5 establishes the offline baseline. In live REST mode, depth5 is only a read-only sanity observation.
 - USD-M diffs validate `U <= u` and use `U/u/pu`. The first non-stale diff after a depth5 baseline may overlap/bridge that baseline; after that, `pu` must equal the previous final update ID. A mismatch is a gap.
-- A gap marks the book out of sync. Diffs are not applied until a depth5 refresh replaces the modeled state and establishes a new baseline.
-- On a connection failure, the local book, sequence baseline, and initial-overlap state are reset; `conn_epoch` increments and `conn_seq` restarts at 1 after reconnection. The reconnect delay is two seconds.
+- A live sequence gap marks the REST-backed book out of sync, starts REST resynchronization, and buffers diffs until a complete bridge validates. Replay mode has no REST access and waits for a recorded depth5 baseline after a gap.
+- On a live connection failure, the local book and sequence baseline are reset and REST resynchronization begins after reconnection; `conn_epoch` increments and `conn_seq` restarts at 1. The reconnect delay is two seconds.
 
 ## I/O, Shutdown, and Limitations
 
-Socket reads and CSV writes are synchronous on one thread. Each market row and emitted book row is flushed immediately; disk latency can therefore block message processing. SIGINT/SIGTERM set a stop flag. After the blocking read returns, the client attempts a normal WebSocket close and closes both CSV files. RAII owns the WebSocket, TLS stream, socket, and I/O context.
+WebSocket reads and CSV writes are synchronous on the main thread. REST DNS/TCP/TLS/HTTP runs asynchronously so the reader can continue buffering depth messages. Each market row and emitted book row is flushed immediately; disk latency can therefore block message processing. SIGINT/SIGTERM set a stop flag. After the blocking read returns, the client attempts a normal WebSocket close and closes both CSV files. RAII owns the WebSocket, TLS stream, sockets, I/O contexts, and REST future.
 
-The local book is a top-five model, not a complete exchange book. There is no REST snapshot plus diff-buffer resynchronization, multi-symbol support, or sharding. Gap recovery and reconnect recovery are implemented/documented but were not dynamically exercised in the final captures.
+The live local book uses a REST snapshot capped at 1,000 levels per side; it is not a complete exchange book. Multi-symbol support and sharding are not implemented. Deterministic tests exercise gap/reconnect recovery, but a gap or reconnect was not naturally triggered in the final live captures.
 
 ## Optional / Stretch Features
 
@@ -135,9 +135,37 @@ Replay performs no DNS, TLS, or WebSocket operations. It writes only `order_book
 
 Validation used `output-linux-90s/market_data.csv`: 3,980 input events (846 depth diffs, 846 depth5, 2,288 trades), 846 output order-book rows, 0 applied diffs, 846 stale diffs, 0 gaps, and 0 rejected records. Replay output matched the original Spot `order_book.csv` byte-for-byte. Two independent replays also matched byte-for-byte (SHA-256 `b3732c1ecd0b01928e8a82b2c32756beded838d0e0185f233525b50037e1d4bb`). Automated tests cover deterministic replay, escaped JSON, snapshot/diff/trade behavior, recorded timestamps, epoch sequence preservation, and malformed input rejection.
 
+### REST Snapshot + Buffered Resynchronization
+
+This optional recovery feature restores a differential order book after a sequence gap or WebSocket reconnect. It keeps reading the WebSocket while the REST request runs and buffers differential events until the snapshot can be bridged.
+
+```text
+WebSocket depth -> sequence validation -> gap/reconnect?
+					   no -> apply differential event
+					   yes -> buffer depth events
+						   -> REST snapshot
+						   -> discard stale events
+						   -> validate first bridge and chain
+						   -> commit snapshot plus buffered diffs
+						   -> resume normal processing
+```
+
+- Spot snapshot: `GET https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=1000`.
+- USD-M Futures snapshot: `GET https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=1000`.
+- Both endpoints use uppercase symbols. The selected limit is 1,000 levels per side. Prices and quantities use the existing checked `10^8` fixed-point conversion.
+- A connection starts in REST resynchronization. A differential gap or invalid sequence continuity also resets the local model and starts resynchronization. Old connection sequence state is not reused.
+- The buffer holds at most 2,048 differential events for the single symbol. On overflow it is cleared explicitly, any in-flight response is discarded, and a fresh snapshot is requested after backoff.
+- Spot discards buffered events with `u <= lastUpdateId`; the first event must cover the next snapshot update (`U <= lastUpdateId + 1 <= u`). Later diffs must not skip an update (`U <= current_u + 1`).
+- USD-M discards stale events, permits the first event to bridge the REST `lastUpdateId` using `U/u/pu`, and requires subsequent `pu` to equal the prior final `u`. A mismatch retries synchronization; no buffered state is committed unless the entire chain validates.
+- REST snapshots replace the full modeled book and are staged separately from differential updates. Their response has no market receive timestamp, so no order-book row is emitted for the REST response itself. Buffered diffs retain their original CSV timestamps. After synchronization, depth5 remains a read-only partial sanity observation; it never replaces the REST-backed book. Mismatches are reported but do not cause repeated REST requests.
+- REST work uses asynchronous DNS/TCP/TLS/HTTP with a 10-second deadline, certificate/host verification, and a 4 MiB response limit. Failures retry with 2, 4, 8, 16, then 30 seconds maximum; HTTP 429/418 `Retry-After` is honored when supplied. No API credentials are used.
+- Replay mode remains offline and does not fetch REST data. Since the market CSV does not contain the REST response, replay cannot reproduce a live book after REST-based recovery; it continues to use recorded depth5 events as its replay baseline.
+
+Deterministic fault-injection tests cover snapshot parsing for both venues, buffer bridging/stale discard, multi-event continuity, gap and `pu` mismatch recovery, reconnect state reset, overflow, malformed responses, HTTP 418/429 backoff, and output book correctness. The final 12-second live Spot run fetched snapshot `101129856626`, buffered 7 events, discarded 5 stale events, and applied 2. The final 12-second USD-M run fetched snapshot `11753732261170`, buffered 5 events, and discarded all 5 as stale. Both shut down normally; neither naturally triggered a gap or reconnect. Dynamic live gap/reconnect recovery remains unverified.
+
 ## Validation
 
-The final Linux/WSL build used GCC 13.3.0 and CMake 3.28.3. The clean Release build completed with `-Wall -Wextra`; CTest passed 2/2, including the replay tests, and both test executables passed directly.
+The validated Linux/WSL toolchain is GCC 13.3.0 and CMake 3.28.3. A prior clean Release build completed with `-Wall -Wextra`. In the final submission-readiness pass on 2026-10-07, `cmake --build build-linux --parallel` completed with `ninja: no work to do`, and `ctest --test-dir build-linux --output-on-failure` passed 3/3. Earlier direct runs of all three test executables also passed.
 
 Spot capture: `output-linux-90s/` contains the latest paired BTCUSDT run made with a 90-second limit. Its event timestamps span 84.245585 seconds; three receive timestamps moved backward by approximately 1.4–1.6 seconds, while `conn_seq` remained ordered. It recorded 3,980 market rows: 2,288 trades, 846 depth5 events, and 846 depth diffs; 846 order-book rows were replay-checked. All three stream types arrived, CSV/JSON schemas validated, and every order-book row matched its depth5 source snapshot. All 846 diffs were stale against the latest snapshot baseline, so this capture did not demonstrate applied Spot diffs or deletions. No gaps or reconnects occurred.
 
@@ -155,4 +183,4 @@ git tag -a v1.0.0 -m "Submission v1.0.0"
 git push submission v1.0.0
 ```
 
-The project `.gitignore` excludes build outputs, ordinary run directories, compiled artifacts, and local secret configuration. The `output-linux-90s/` Spot sample is intentionally not ignored so it can be included as the required sample. Never submit credentials, API keys, or private keys.
+The project `.gitignore` excludes build outputs, ordinary capture directories, compiled artifacts, logs, and local secret configuration. It keeps the two `output-linux-90s/` sample CSVs eligible for submission. Ignore rules do not remove files already tracked by Git; review `git ls-files` before staging so generated build outputs, scratch probes, and other capture CSVs are not included accidentally. Never submit credentials, API keys, or private keys.

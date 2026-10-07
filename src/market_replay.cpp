@@ -1,5 +1,6 @@
 #include "market_replay.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <limits>
 #include <stdexcept>
@@ -268,10 +269,12 @@ std::vector<DepthLevel> parseDepthLevels(const nlohmann::json& payload,
         if (!level.is_array() || level.size() != 2 || !level[0].is_string() || !level[1].is_string()) {
             throw std::invalid_argument("malformed price/quantity entry in depth array " + field_name);
         }
-        result.push_back({
-            scaledIntegerFromString(level[0].get<std::string>(), PRICE_SCALE, field_name + ".price"),
-            scaledIntegerFromString(level[1].get<std::string>(), QTY_SCALE, field_name + ".qty")
-        });
+        const auto price = scaledIntegerFromString(level[0].get<std::string>(), PRICE_SCALE, field_name + ".price");
+        const auto quantity = scaledIntegerFromString(level[1].get<std::string>(), QTY_SCALE, field_name + ".qty");
+        if (price <= 0 || quantity < 0) {
+            throw std::invalid_argument("invalid non-positive price or negative quantity in depth array " + field_name);
+        }
+        result.push_back({price, quantity});
     }
     return result;
 }
@@ -297,13 +300,22 @@ OrderBookRow makeOrderBookRow(const NormalizedMarketEvent& event,
 
 }  // namespace
 
-OrderBookProcessor::OrderBookProcessor(std::string venue, std::string symbol)
-    : venue_(std::move(venue)), symbol_(normalizeSymbol(symbol)) {
+OrderBookProcessor::OrderBookProcessor(std::string venue,
+                                       std::string symbol,
+                                       OrderBookRecoveryMode recovery_mode,
+                                       size_t buffer_limit)
+    : venue_(std::move(venue)),
+      symbol_(normalizeSymbol(symbol)),
+      recovery_mode_(recovery_mode),
+      buffer_limit_(buffer_limit) {
     if (venue_ != "spot" && venue_ != "usdm") {
         throw std::invalid_argument("venue must be spot or usdm");
     }
     if (symbol_.empty()) {
         throw std::invalid_argument("symbol must be non-empty");
+    }
+    if (buffer_limit_ == 0) {
+        throw std::invalid_argument("resync buffer limit must be positive");
     }
 }
 
@@ -325,21 +337,37 @@ ProcessedMarketEvent OrderBookProcessor::process(const NormalizedMarketEvent& ev
     if (event.stream_kind == "depth_diff") {
         const auto bids = parseDepthLevels(event.payload, "b");
         const auto asks = parseDepthLevels(event.payload, "a");
-        uint64_t checked_seq = last_depth_seq_;
-        bool checked_initial = initial_depth_diff_pending_;
-        const auto sequence_status = applyDepthSequence(venue_, event.payload, checked_seq, checked_initial);
+        if (resynchronizing_) {
+            uint64_t checked_seq = last_depth_seq_;
+            bool checked_initial = initial_depth_diff_pending_;
+            (void)applyDepthSequence(venue_, event.payload, checked_seq, checked_initial);
+            if (buffered_depth_events_.size() >= buffer_limit_) {
+                buffered_depth_events_.clear();
+                return {EventDisposition::buffer_overflow, std::nullopt};
+            }
+            buffered_depth_events_.push_back(event);
+            return {EventDisposition::buffered, std::nullopt};
+        }
         if (book_out_of_sync_ || !have_depth_baseline_) {
+            uint64_t checked_seq = last_depth_seq_;
+            bool checked_initial = initial_depth_diff_pending_;
+            (void)applyDepthSequence(venue_, event.payload, checked_seq, checked_initial);
             return {EventDisposition::ignored_out_of_sync, std::nullopt};
         }
+        const auto sequence_status = applyDepthSequence(venue_, event.payload, last_depth_seq_, initial_depth_diff_pending_);
         if (sequence_status == DepthSequenceStatus::gap) {
+            if (recovery_mode_ == OrderBookRecoveryMode::rest_snapshot) {
+                beginResynchronization();
+                buffered_depth_events_.push_back(event);
+                return {EventDisposition::gap, std::nullopt};
+            }
             book_out_of_sync_ = true;
             have_depth_baseline_ = false;
             initial_depth_diff_pending_ = false;
             order_book_.out_of_sync = true;
             return {EventDisposition::gap, std::nullopt};
         }
-        const auto applied_status = applyDepthSequence(venue_, event.payload, last_depth_seq_, initial_depth_diff_pending_);
-        if (applied_status == DepthSequenceStatus::stale) {
+        if (sequence_status == DepthSequenceStatus::stale) {
             return {EventDisposition::stale_diff, std::nullopt};
         }
         order_book_.applyDepthDiff(bids, asks);
@@ -354,6 +382,28 @@ ProcessedMarketEvent OrderBookProcessor::process(const NormalizedMarketEvent& ev
         const auto bids = parseDepthLevels(event.payload, bid_field);
         const auto asks = parseDepthLevels(event.payload, ask_field);
         const uint64_t snapshot_id = depthSnapshotUpdateId(venue_, event.payload);
+        if (recovery_mode_ == OrderBookRecoveryMode::rest_snapshot) {
+            if (resynchronizing_ || !have_depth_baseline_ || snapshot_id < last_depth_seq_) {
+                return {EventDisposition::depth5_observed, std::nullopt};
+            }
+            const auto current_top = order_book_.topFive();
+            bool matches = bids.size() <= current_top.bid_prices.size() &&
+                           asks.size() <= current_top.ask_prices.size();
+            for (size_t index = 0; matches && index < bids.size(); ++index) {
+                matches = bids[index].price == current_top.bid_prices[index] &&
+                          bids[index].qty == current_top.bid_sizes[index];
+            }
+            for (size_t index = 0; matches && index < asks.size(); ++index) {
+                matches = asks[index].price == current_top.ask_prices[index] &&
+                          asks[index].qty == current_top.ask_sizes[index];
+            }
+            if (!matches) {
+                return {EventDisposition::depth5_mismatch, std::nullopt};
+            }
+            ++orderbook_seq_;
+            return {EventDisposition::depth5_observed,
+                    makeOrderBookRow(event, order_book_, orderbook_seq_, 'S')};
+        }
         order_book_.applyDepth5(bids, asks);
         last_depth_seq_ = snapshot_id;
         have_depth_baseline_ = true;
@@ -376,6 +426,91 @@ void OrderBookProcessor::reset() {
     have_depth_baseline_ = false;
     initial_depth_diff_pending_ = false;
     book_out_of_sync_ = true;
+    resynchronizing_ = false;
+    buffered_depth_events_.clear();
+}
+
+void OrderBookProcessor::beginResynchronization() {
+    if (recovery_mode_ != OrderBookRecoveryMode::rest_snapshot) {
+        throw std::logic_error("REST resynchronization is not enabled for this processor");
+    }
+    reset();
+    resynchronizing_ = true;
+}
+
+bool OrderBookProcessor::isResynchronizing() const {
+    return resynchronizing_;
+}
+
+size_t OrderBookProcessor::bufferedDepthEventCount() const {
+    return buffered_depth_events_.size();
+}
+
+RestDepthSnapshot parseRestDepthSnapshot(const std::string& venue, const nlohmann::json& payload) {
+    if (venue != "spot" && venue != "usdm") {
+        throw std::invalid_argument("venue must be spot or usdm");
+    }
+    if (!payload.is_object()) {
+        throw std::invalid_argument("REST depth snapshot must be a JSON object");
+    }
+    RestDepthSnapshot snapshot;
+    snapshot.last_update_id = parseSequenceValue(payload, "lastUpdateId");
+    snapshot.bids = parseDepthLevels(payload, "bids");
+    snapshot.asks = parseDepthLevels(payload, "asks");
+    return snapshot;
+}
+
+SnapshotRecoveryResult OrderBookProcessor::restoreFromRestSnapshot(const nlohmann::json& payload) {
+    if (recovery_mode_ != OrderBookRecoveryMode::rest_snapshot || !resynchronizing_) {
+        throw std::logic_error("REST snapshot received while processor is not resynchronizing");
+    }
+    const auto snapshot = parseRestDepthSnapshot(venue_, payload);
+    SnapshotRecoveryResult result;
+    result.snapshot_update_id = snapshot.last_update_id;
+    result.buffered_events = buffered_depth_events_.size();
+
+    OrderBook staged_book;
+    staged_book.applyDepth5(snapshot.bids, snapshot.asks);
+    uint64_t staged_last_update_id = snapshot.last_update_id;
+    bool staged_initial_update_pending = true;
+    uint64_t staged_orderbook_seq = orderbook_seq_;
+    result.rows.reserve(buffered_depth_events_.size());
+
+    for (const auto& event : buffered_depth_events_) {
+        const auto bids = parseDepthLevels(event.payload, "b");
+        const auto asks = parseDepthLevels(event.payload, "a");
+        const auto status = applyDepthSequence(venue_, event.payload, staged_last_update_id, staged_initial_update_pending);
+        if (status == DepthSequenceStatus::stale) {
+            ++result.stale_events_discarded;
+            continue;
+        }
+        if (status == DepthSequenceStatus::gap) {
+            result.reason = "buffered differential events do not bridge snapshot sequence";
+            result.rows.clear();
+            return result;
+        }
+        staged_book.applyDepthDiff(bids, asks);
+        ++staged_orderbook_seq;
+        result.rows.push_back(makeOrderBookRow(event, staged_book, staged_orderbook_seq, 'D'));
+    }
+
+    order_book_ = std::move(staged_book);
+    order_book_.out_of_sync = false;
+    last_depth_seq_ = staged_last_update_id;
+    orderbook_seq_ = staged_orderbook_seq;
+    have_depth_baseline_ = true;
+    initial_depth_diff_pending_ = staged_initial_update_pending;
+    book_out_of_sync_ = false;
+    resynchronizing_ = false;
+    buffered_depth_events_.clear();
+    result.synchronized = true;
+    return result;
+}
+
+uint32_t restRetryDelaySeconds(uint32_t failed_attempt, uint32_t retry_after_seconds) {
+    const uint32_t exponent = std::min(failed_attempt > 0 ? failed_attempt - 1 : 0, 4u);
+    const uint32_t backoff = std::min(2u << exponent, 30u);
+    return std::max(backoff, retry_after_seconds);
 }
 
 void writeOrderBookCsvHeader(std::ostream& output) {
@@ -427,6 +562,10 @@ ReplayStats replayMarketDataCsv(std::istream& input, std::ostream& order_book_ou
             case EventDisposition::stale_diff: ++stats.stale_diff_events; break;
             case EventDisposition::gap: ++stats.gap_events; break;
             case EventDisposition::ignored_out_of_sync: ++stats.ignored_out_of_sync_events; break;
+            case EventDisposition::buffered:
+            case EventDisposition::buffer_overflow:
+            case EventDisposition::depth5_observed: break;
+            case EventDisposition::depth5_mismatch: break;
             case EventDisposition::snapshot:
             case EventDisposition::trade: break;
         }

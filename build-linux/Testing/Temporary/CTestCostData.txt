@@ -1,3 +1,4 @@
-order_book_tests 13 0.00117014
-market_replay_tests 5 0.00322085
+order_book_tests 31 0.000311348
+market_replay_tests 22 0.000473542
+resync_tests 17 0.00083841
 ---

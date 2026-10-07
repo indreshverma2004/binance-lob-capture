@@ -9,9 +9,7 @@
 
 namespace binance_capture {
 
-namespace {
-
-uint64_t sequenceValue(const nlohmann::json& payload, const std::string& field) {
+uint64_t parseSequenceValue(const nlohmann::json& payload, const std::string& field) {
     if (!payload.contains(field)) {
         throw std::invalid_argument("depth event missing sequence field " + field);
     }
@@ -34,8 +32,6 @@ uint64_t sequenceValue(const nlohmann::json& payload, const std::string& field) 
     }
     throw std::invalid_argument("depth event has invalid sequence field " + field);
 }
-
-}  // namespace
 
 std::string csvEscape(const std::string& value) {
     if (value.find_first_of(",\"\r\n") == std::string::npos) {
@@ -190,11 +186,11 @@ uint32_t stableInstrumentId(const std::string& symbol) {
 
 uint64_t depthSnapshotUpdateId(const std::string& venue, const nlohmann::json& payload) {
     if (venue == "spot") {
-        return sequenceValue(payload, "lastUpdateId");
+        return parseSequenceValue(payload, "lastUpdateId");
     }
     if (venue == "usdm") {
-        const uint64_t first_update_id = sequenceValue(payload, "U");
-        const uint64_t final_update_id = sequenceValue(payload, "u");
+        const uint64_t first_update_id = parseSequenceValue(payload, "U");
+        const uint64_t final_update_id = parseSequenceValue(payload, "u");
         if (first_update_id > final_update_id) {
             throw std::invalid_argument("depth5 snapshot has an invalid U/u range");
         }
@@ -207,14 +203,14 @@ DepthSequenceStatus applyDepthSequence(const std::string& venue,
                                        const nlohmann::json& payload,
                                        uint64_t& last_update_id,
                                        bool& initial_update_pending) {
-    const uint64_t first_update_id = sequenceValue(payload, "U");
-    const uint64_t final_update_id = sequenceValue(payload, "u");
+    const uint64_t first_update_id = parseSequenceValue(payload, "U");
+    const uint64_t final_update_id = parseSequenceValue(payload, "u");
     if (first_update_id > final_update_id) {
         throw std::invalid_argument("depth event has an invalid U/u range");
     }
     uint64_t previous_update_id = 0;
     if (venue == "usdm") {
-        previous_update_id = sequenceValue(payload, "pu");
+        previous_update_id = parseSequenceValue(payload, "pu");
     } else if (venue != "spot") {
         throw std::invalid_argument("venue must be spot or usdm");
     }

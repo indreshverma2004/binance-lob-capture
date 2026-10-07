@@ -50,6 +50,7 @@ void expectReplayFailure(const std::string& input, const std::string& expected_m
         }
         return;
     }
+    std::cerr << "Expected replay error containing: " << expected_message << "; input was accepted\n";
     assert(false && "expected replay to reject malformed input");
 }
 

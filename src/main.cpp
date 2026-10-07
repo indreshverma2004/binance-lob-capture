@@ -1,5 +1,6 @@
 #include "binance_capture.hpp"
 #include "market_replay.hpp"
+#include "rest_snapshot_client.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -15,6 +16,7 @@
 #include <csignal>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -204,7 +206,8 @@ int main(int argc, char** argv) {
 
         uint64_t conn_epoch = 0;
         uint64_t conn_seq = 0;
-        binance_capture::OrderBookProcessor orderbook_processor(venue, symbol);
+        binance_capture::OrderBookProcessor orderbook_processor(
+            venue, symbol, binance_capture::OrderBookRecoveryMode::rest_snapshot);
 
         while (!g_stop_requested.load(std::memory_order_relaxed)) {
             try {
@@ -250,6 +253,115 @@ int main(int argc, char** argv) {
                 ws.handshake(host, path);
 
                 std::cout << "WebSocket connected.\n";
+                orderbook_processor.beginResynchronization();
+                std::future<nlohmann::json> rest_future;
+                bool rest_request_in_flight = false;
+                bool discard_rest_result = false;
+                uint32_t rest_attempt = 0;
+                auto next_rest_attempt = std::chrono::steady_clock::now();
+                std::string resync_reason = "new WebSocket connection";
+                bool depth5_sanity_warning_logged = false;
+
+                auto startRestRequest = [&]() {
+                    if (rest_request_in_flight || g_stop_requested.load(std::memory_order_relaxed)) {
+                        return;
+                    }
+                    ++rest_attempt;
+                    std::cout << "REST resync request: venue=" << venue << " symbol=" << symbol
+                              << " attempt=" << rest_attempt << " reason=" << resync_reason
+                              << " buffered_events=" << orderbook_processor.bufferedDepthEventCount() << '\n';
+                    try {
+                        rest_future = std::async(std::launch::async, [venue, symbol]() {
+                            return binance_capture::fetchRestDepthSnapshot(venue, symbol);
+                        });
+                        rest_request_in_flight = true;
+                    } catch (const std::exception& exc) {
+                        const auto delay = binance_capture::restRetryDelaySeconds(rest_attempt);
+                        std::cerr << "Unable to start REST snapshot request: " << exc.what()
+                                  << "; retrying in " << delay << " seconds.\n";
+                        next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(delay);
+                    }
+                };
+
+                auto writeRecoveredRows = [&](const std::vector<binance_capture::OrderBookRow>& rows) {
+                    for (const auto& row : rows) {
+                        binance_capture::writeOrderBookCsvRow(orderbook_csv, row);
+                        orderbook_csv.flush();
+                    }
+                };
+
+                auto pollRestRequest = [&]() {
+                    if (!rest_request_in_flight ||
+                        rest_future.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+                        return;
+                    }
+                    rest_request_in_flight = false;
+                    nlohmann::json snapshot_payload;
+                    try {
+                        snapshot_payload = rest_future.get();
+                    } catch (const binance_capture::RestRequestError& exc) {
+                        if (discard_rest_result) {
+                            discard_rest_result = false;
+                            next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                            std::cerr << "Discarded REST request after resync buffer overflow: " << exc.what() << '\n';
+                            return;
+                        }
+                        const auto delay = binance_capture::restRetryDelaySeconds(rest_attempt, exc.retryAfterSeconds());
+                        std::cerr << "REST resync failed: " << exc.what() << "; venue=" << venue
+                                  << " symbol=" << symbol << "; retrying in " << delay << " seconds.\n";
+                        next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(delay);
+                        return;
+                    } catch (const std::exception& exc) {
+                        if (discard_rest_result) {
+                            discard_rest_result = false;
+                            next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                            std::cerr << "Discarded REST request after resync buffer overflow: " << exc.what() << '\n';
+                            return;
+                        }
+                        const auto delay = binance_capture::restRetryDelaySeconds(rest_attempt);
+                        std::cerr << "REST resync failed: " << exc.what() << "; venue=" << venue
+                                  << " symbol=" << symbol << "; retrying in " << delay << " seconds.\n";
+                        next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(delay);
+                        return;
+                    }
+
+                    if (discard_rest_result) {
+                        discard_rest_result = false;
+                        next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                        std::cout << "Discarded REST snapshot after resync buffer overflow; buffered_events="
+                                  << orderbook_processor.bufferedDepthEventCount() << '\n';
+                        return;
+                    }
+
+                    try {
+                        const auto recovery = orderbook_processor.restoreFromRestSnapshot(snapshot_payload);
+                        if (!recovery.synchronized) {
+                            const auto delay = binance_capture::restRetryDelaySeconds(rest_attempt);
+                            resync_reason = recovery.reason;
+                            std::cerr << "REST snapshot sequence did not bridge buffered events: venue=" << venue
+                                      << " symbol=" << symbol << " snapshot_seq=" << recovery.snapshot_update_id
+                                      << " buffered_events=" << recovery.buffered_events << "; retrying in "
+                                      << delay << " seconds.\n";
+                            next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(delay);
+                            return;
+                        }
+                        writeRecoveredRows(recovery.rows);
+                        std::cout << "REST resync complete: venue=" << venue << " symbol=" << symbol
+                                  << " snapshot_seq=" << recovery.snapshot_update_id
+                                  << " buffered_events=" << recovery.buffered_events
+                                  << " stale_discarded=" << recovery.stale_events_discarded
+                                  << " applied_buffered=" << recovery.rows.size() << '\n';
+                        rest_attempt = 0;
+                        resync_reason.clear();
+                    } catch (const std::exception& exc) {
+                        const auto delay = binance_capture::restRetryDelaySeconds(rest_attempt);
+                        std::cerr << "Invalid REST depth snapshot: " << exc.what() << "; venue=" << venue
+                                  << " symbol=" << symbol << "; retrying in " << delay << " seconds.\n";
+                        next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(delay);
+                    }
+                };
+
+                startRestRequest();
                 while (!g_stop_requested.load(std::memory_order_relaxed)) {
                     beast::flat_buffer buffer;
                     ws.read(buffer);
@@ -289,11 +401,29 @@ int main(int argc, char** argv) {
                     };
                     const auto processed = orderbook_processor.process(event);
                     if (processed.disposition == binance_capture::EventDisposition::gap) {
-                        std::cerr << "Depth sequence gap; waiting for depth5 refresh.\n";
+                        resync_reason = "differential sequence gap";
+                        std::cerr << "Depth sequence gap; buffering updates and requesting REST snapshot.\n";
+                    } else if (processed.disposition == binance_capture::EventDisposition::depth5_mismatch) {
+                        if (!depth5_sanity_warning_logged) {
+                            std::cerr << "Depth5 partial view differs from REST-backed book; retained REST/diff state.\n";
+                            depth5_sanity_warning_logged = true;
+                        }
+                    } else if (processed.disposition == binance_capture::EventDisposition::buffer_overflow) {
+                        discard_rest_result = rest_request_in_flight;
+                        rest_attempt = 0;
+                        resync_reason = "depth event buffer overflow";
+                        next_rest_attempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                        std::cerr << "REST resync buffer overflow; discarded buffer and will fetch a fresh snapshot.\n";
                     }
                     if (processed.order_book_row) {
                         binance_capture::writeOrderBookCsvRow(orderbook_csv, *processed.order_book_row);
                         orderbook_csv.flush();
+                    }
+
+                    pollRestRequest();
+                    if (orderbook_processor.isResynchronizing() && !rest_request_in_flight &&
+                        std::chrono::steady_clock::now() >= next_rest_attempt) {
+                        startRestRequest();
                     }
                 }
                 if (g_stop_requested.load(std::memory_order_relaxed)) {
@@ -307,7 +437,7 @@ int main(int argc, char** argv) {
                 }
                 ++conn_epoch;
                 conn_seq = 0;
-                orderbook_processor.reset();
+                orderbook_processor.beginResynchronization();
                 std::cout << "Reconnecting in 2 seconds...\n";
                 std::this_thread::sleep_for(std::chrono::seconds(2));
                 if (g_stop_requested.load(std::memory_order_relaxed)) {
