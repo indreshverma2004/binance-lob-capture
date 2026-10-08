@@ -113,7 +113,7 @@ Toolchain: GCC 13.3.0, CMake 3.28.3, C++17. Dependencies: Boost.Asio/Beast, Boos
 
 ## Current Git Status
 
-No commit was made. The current worktree includes multi-symbol, duration, and date-stamped output changes in `README.md`, `PROJECT_STATUS.md`, `include/sharding.hpp`, `src/main.cpp`, `src/market_replay.cpp`, and `tests/test_replay.cpp`. Three date-stamped live capture pairs were created in `output/`; the prior generic output files were preserved. The Linux build updated tracked generated files under `build-linux/`. Other pre-existing worktree changes remain; review `git status --short` before staging. The branch is `main`, tracking `origin/main`; `origin` points to `https://github.com/indreshverma2004/ordertracker.git`, which appears unrelated to this assignment. Do not push this assignment to that remote.
+No commit was made. The current worktree includes multi-symbol, duration, and date-stamped output changes in `README.md`, `PROJECT_STATUS.md`, `include/sharding.hpp`, `src/main.cpp`, `src/market_replay.cpp`, and `tests/test_replay.cpp`. Three date-stamped live capture pairs were created in `output/`; the USD-M pair was also copied into `output-usdm/` for GitHub inclusion. The prior generic output files were preserved. The Linux build updated tracked generated files under `build-linux/`. Other pre-existing worktree changes remain; review `git status --short` before staging. The branch is `main`, tracking `origin/main`; `origin` points to `https://github.com/indreshverma2004/ordertracker.git`, which appears unrelated to this assignment. Do not push this assignment to that remote.
 
 ## Optional Features Completed
 

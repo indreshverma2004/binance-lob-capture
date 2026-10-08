@@ -3,8 +3,9 @@
 /output/
 !/output/
 /output-linux/
-/output-usdm/
 /output-*/
+!/output-usdm/
+!/output-usdm/**
 /ssl_test.cpp
 /test.cpp
 *.o
