@@ -1,6 +1,6 @@
 # Binance Market-Data Collector
 
-A C++ Binance public-market-data collector for Spot and USD-M Futures. It captures combined WebSocket streams and maintains a local top-five order-book view for one configured symbol per run.
+A C++ Binance public-market-data collector for Spot and USD-M Futures. It captures combined WebSocket streams for multiple symbols, partitions them into stable WebSocket shards, and maintains an independent local top-five order-book view for each symbol.
 
 ## Language, Toolchain, and Dependencies
 
@@ -48,17 +48,32 @@ Market-data events are logged in socket processing order. Trades are captured in
 ## Command Line
 
 ```text
-binance_capture --venue spot|usdm --symbols SYMBOL --output-dir PATH
+binance_capture --venue spot|usdm --symbols SYMBOL[,SYMBOL...] --output-dir PATH [--duration-seconds N]
 ```
 
 Examples:
 
 ```bash
-./build-linux/binance_capture --venue spot --symbols BTCUSDT --output-dir ./output-linux
-./build-linux/binance_capture --venue usdm --symbols BTCUSDT --output-dir ./output-usdm
+./build/binance_capture --venue spot --symbols BTCUSDT --output-dir ./output --duration-seconds 120
+./build/binance_capture --venue spot --symbols BTCUSDT,ETHUSDT --output-dir ./output --duration-seconds 120
+./build/binance_capture --venue usdm --symbols BTCUSDT --output-dir ./output --duration-seconds 120
 ```
 
-Exactly one uppercase or lowercase symbol is supported per run. The CSV symbol is uppercase; the WebSocket stream name is lowercase. Comma-separated multi-symbol input is rejected. The run creates or truncates `market_data.csv` and `order_book.csv` in the selected output directory.
+`--symbols` accepts a comma-separated list of unique uppercase or lowercase symbols. Symbols are normalized to uppercase in CSV and lowercase in WebSocket stream names. Input order determines stable zero-based shard assignment: consecutive groups of at most 10 symbols share one combined-stream WebSocket connection and one worker thread. Each shard has its own `conn_epoch` and `conn_seq`; each symbol has a separate book, depth sequence state, and REST resynchronization state. Duplicate, empty, and non-alphanumeric symbol entries are rejected. `--duration-seconds 120` stops a capture after two minutes; omit it to run until interrupted.
+
+Live capture writes a paired set of files to the selected directory. The basename uses the venue, configured symbols, and the local date when the run starts:
+
+```text
+output/
+  market_data_spot_BTCUSDT_2026-10-08.csv
+  market_data_spot_BTCUSDT_2026-10-08_orderbook.csv
+  market_data_spot_BTCUSDT-ETHUSDT_2026-10-08.csv
+  market_data_spot_BTCUSDT-ETHUSDT_2026-10-08_orderbook.csv
+  market_data_usdm_BTCUSDT_2026-10-08.csv
+  market_data_usdm_BTCUSDT_2026-10-08_orderbook.csv
+```
+
+The date above is an example; the program inserts the local start date in `YYYY-MM-DD` format. For multiple symbols, uppercase names are joined with `-` in one combined capture basename. Repeated runs that would reuse an existing same-day filename are refused instead of overwriting prior capture data. The orderbook companion contains the 26-column order-book schema described below.
 
 ## Market-Data CSV
 
@@ -73,7 +88,7 @@ Fields:
 - `recv_tsec`, `recv_tnsec`: local wall-clock receive time, split into integer seconds and nanosecond remainder.
 - `venue`: `spot` or `usdm`.
 - `stream_kind`: `depth_diff`, `depth5`, or `trade`.
-- `shard_id`: 0 for this single-connection implementation.
+- `shard_id`: stable zero-based symbol group/connection index. Each shard independently starts `conn_epoch` at 0 and `conn_seq` at 1; after a failed connection, its epoch increments and its sequence restarts at 1. Records from multiple shard workers are serialized to the shared CSV, so cross-shard row order reflects thread scheduling; within each shard, event and sequence order is preserved.
 - `conn_epoch`: starts at 0 and increments after a failed connection; no prior sequence state is carried into the next epoch.
 - `conn_seq`: starts at 1 and increases in event processing order within the epoch.
 - `symbol`: uppercase configured symbol.
@@ -115,9 +130,9 @@ Timestamps use local `std::chrono::system_clock` wall time sampled immediately a
 
 ## I/O, Shutdown, and Limitations
 
-WebSocket reads and CSV writes are synchronous on the main thread. REST DNS/TCP/TLS/HTTP runs asynchronously so the reader can continue buffering depth messages. Each market row and emitted book row is flushed immediately; disk latency can therefore block message processing. SIGINT/SIGTERM set a stop flag. After the blocking read returns, the client attempts a normal WebSocket close and closes both CSV files. RAII owns the WebSocket, TLS stream, sockets, I/O contexts, and REST future.
+Each shard has one blocking WebSocket reader/writer thread and independent per-symbol order-book processors. REST DNS/TCP/TLS/HTTP requests run asynchronously so that shard readers can continue buffering depth messages. A mutex serializes writes and flushes to the two shared CSV files; order-book `seqNo` is assigned globally while holding the output lock. Disk latency can therefore block shard processing. SIGINT/SIGTERM set a shared stop flag; after a blocking read returns, each worker attempts a normal WebSocket close, then the main thread joins workers and closes the files. RAII owns WebSocket, TLS, sockets, I/O contexts, and REST futures.
 
-The live local book uses a REST snapshot capped at 1,000 levels per side; it is not a complete exchange book. Multi-symbol support and sharding are not implemented. Deterministic tests exercise gap/reconnect recovery, but a gap or reconnect was not naturally triggered in the final live captures.
+The live local book uses a REST snapshot capped at 1,000 levels per side; it is not a complete exchange book. The current shard size is a conservative application setting of 10 symbols per WebSocket connection. Deterministic tests exercise gap/reconnect recovery, but a gap or reconnect was not naturally triggered in the final live captures.
 
 ## Optional / Stretch Features
 
@@ -126,12 +141,12 @@ The live local book uses a REST snapshot capped at 1,000 levels per side; it is 
 Replay mode is an optional local-review feature for regenerating order-book rows from a captured market-data CSV without contacting Binance. It shares the same normalized event processor, order-book logic, fixed-point parser, and sequence handling used by live capture.
 
 ```bash
-./build-linux/binance_capture --replay ./output/market_data.csv --output-dir ./replay-output
+./build-linux/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./replay-output
 ```
 
-The input must use the exact 9-column market-data header and contain one venue, symbol, and shard, with contiguous `conn_seq` values within each increasing `conn_epoch`. RFC4180 quoting is parsed and unescaped before `payload_json` is parsed. Invalid headers, CSV fields, JSON, timestamps, sequence metadata, stream kinds, and depth numerics fail with the input row number where available.
+The input must use the exact 9-column market-data header and contain one venue. Multiple symbols and shards may be interleaved. Each symbol must remain assigned to the same shard throughout the file; each shard has independently contiguous `conn_seq` values within increasing `conn_epoch` values. RFC4180 quoting is parsed and unescaped before `payload_json` is parsed. Invalid headers, CSV fields, JSON, timestamps, sequence metadata, stream kinds, and depth numerics fail with the input row number where available.
 
-Replay performs no DNS, TLS, or WebSocket operations. It writes only `order_book.csv` in the requested directory and does not copy or rewrite `market_data.csv`. The output directory must be separate from the input directory, and replay refuses to overwrite an existing `order_book.csv`. Book timestamps are copied from each recorded market event; replay never substitutes the current clock. Events remain in file order, trades do not modify the book, and a connection-epoch change resets book/baseline state while `seqNo` remains monotonic.
+Replay performs no DNS, TLS, or WebSocket operations. It writes only `order_book.csv` in the requested directory and does not copy or rewrite `market_data.csv`. The output directory must be separate from the input directory, and replay refuses to overwrite an existing `order_book.csv`. Book timestamps are copied from each recorded market event; replay never substitutes the current clock. Events remain in file order, trades do not modify the book, and a shard epoch change resets only that shard's symbol books/baselines. Output `seqNo` is global and remains monotonic across all symbols and shards.
 
 Validation used `output-linux-90s/market_data.csv`: 3,980 input events (846 depth diffs, 846 depth5, 2,288 trades), 846 output order-book rows, 0 applied diffs, 846 stale diffs, 0 gaps, and 0 rejected records. Replay output matched the original Spot `order_book.csv` byte-for-byte. Two independent replays also matched byte-for-byte (SHA-256 `b3732c1ecd0b01928e8a82b2c32756beded838d0e0185f233525b50037e1d4bb`). Automated tests cover deterministic replay, escaped JSON, snapshot/diff/trade behavior, recorded timestamps, epoch sequence preservation, and malformed input rejection.
 
@@ -154,7 +169,7 @@ WebSocket depth -> sequence validation -> gap/reconnect?
 - USD-M Futures snapshot: `GET https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=1000`.
 - Both endpoints use uppercase symbols. The selected limit is 1,000 levels per side. Prices and quantities use the existing checked `10^8` fixed-point conversion.
 - A connection starts in REST resynchronization. A differential gap or invalid sequence continuity also resets the local model and starts resynchronization. Old connection sequence state is not reused.
-- The buffer holds at most 2,048 differential events for the single symbol. On overflow it is cleared explicitly, any in-flight response is discarded, and a fresh snapshot is requested after backoff.
+- Each symbol has an independent buffer holding at most 2,048 differential events. On overflow it is cleared explicitly, any in-flight response is discarded, and a fresh snapshot is requested after backoff.
 - Spot discards buffered events with `u <= lastUpdateId`; the first event must cover the next snapshot update (`U <= lastUpdateId + 1 <= u`). Later diffs must not skip an update (`U <= current_u + 1`).
 - USD-M discards stale events, permits the first event to bridge the REST `lastUpdateId` using `U/u/pu`, and requires subsequent `pu` to equal the prior final `u`. A mismatch retries synchronization; no buffered state is committed unless the entire chain validates.
 - REST snapshots replace the full modeled book and are staged separately from differential updates. Their response has no market receive timestamp, so no order-book row is emitted for the REST response itself. Buffered diffs retain their original CSV timestamps. After synchronization, depth5 remains a read-only partial sanity observation; it never replaces the REST-backed book. Mismatches are reported but do not cause repeated REST requests.
@@ -170,7 +185,7 @@ Live capture prints a metrics summary at normal shutdown. It reports elapsed mon
 Replay can report processing performance with the optional `--benchmark` flag:
 
 ```bash
-./build-linux/binance_capture --replay ./output/market_data.csv --output-dir ./benchmark-output --benchmark
+./build-linux/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./benchmark-output --benchmark
 ```
 
 Benchmark mode uses the normal replay pipeline, writes the regular `order_book.csv`, and reports event/row counts, elapsed processing time, events per second, and rows per second. For the same input, it produces the same deterministic replay output; benchmark timing does not affect processing. Throughput depends on the machine, build, and filesystem; the measured time includes replay processing and flushing the output file.
@@ -196,6 +211,18 @@ Rows/sec:        3286.14
 ```
 
 Normal replay, benchmark replay, and the original order-book CSV had the same SHA-256. This is one environment-specific measurement, not a performance guarantee.
+
+### Current date-stamped live captures
+
+On 2026-10-08, three live captures ran for approximately two minutes each and wrote paired files under `output/`:
+
+| Capture | Market events | Order-book rows | Applied diffs | REST resyncs |
+| --- | ---: | ---: | ---: | ---: |
+| Spot BTCUSDT | 4,995 | 1,612 | 1,207 | 1 |
+| Spot BTCUSDT + ETHUSDT | 12,479 | 3,883 | 2,414 | 2 |
+| USD-M BTCUSDT | 4,865 | 1,509 | 1,194 | 1 |
+
+The paired filenames are `market_data_spot_BTCUSDT_2026-10-08.csv` and its `_orderbook.csv` companion, `market_data_spot_BTCUSDT-ETHUSDT_2026-10-08.csv` and its companion, and `market_data_usdm_BTCUSDT_2026-10-08.csv` and its companion. The existing generic `market_data.csv` and `order_book.csv` in `output/` were left intact. All six new files were checked for exact headers and column counts, per-shard connection-sequence continuity, and monotonically increasing order-book `seqNo`.
 
 Spot capture: `output-linux-90s/` contains the latest paired BTCUSDT run made with a 90-second limit. Its event timestamps span 84.245585 seconds; three receive timestamps moved backward by approximately 1.4–1.6 seconds, while `conn_seq` remained ordered. It recorded 3,980 market rows: 2,288 trades, 846 depth5 events, and 846 depth diffs; 846 order-book rows were replay-checked. All three stream types arrived, CSV/JSON schemas validated, and every order-book row matched its depth5 source snapshot. All 846 diffs were stale against the latest snapshot baseline, so this capture did not demonstrate applied Spot diffs or deletions. No gaps or reconnects occurred.
 

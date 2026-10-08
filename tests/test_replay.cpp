@@ -1,4 +1,5 @@
 #include "market_replay.hpp"
+#include "sharding.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -57,6 +58,12 @@ void expectReplayFailure(const std::string& input, const std::string& expected_m
 }  // namespace
 
 int main() {
+    const auto planned_shards = binance_capture::shardSymbols(
+        {"BTCUSDT", "ETHUSDT", "SOLUSDT"}, 2);
+    assert(planned_shards.size() == 2);
+    assert(planned_shards[0] == std::vector<std::string>({"BTCUSDT", "ETHUSDT"}));
+    assert(planned_shards[1] == std::vector<std::string>({"SOLUSDT"}));
+
     const std::string input = validMarketCsv();
     binance_capture::ReplayStats stats;
     const std::string first_output = runReplay(input, &stats);
@@ -120,6 +127,31 @@ int main() {
     std::getline(epoch_output_stream, line);
     assert(csvFields(line)[2] == "2");
 
+    const std::string interleaved_input =
+        "recv_tsec,recv_tnsec,venue,stream_kind,shard_id,conn_epoch,conn_seq,symbol,payload_json\n"
+        "100,1,spot,depth5,0,0,1,BTCUSDT,\"{\"\"lastUpdateId\"\":100,\"\"bids\"\":[[\"\"10\"\",\"\"1\"\"]],\"\"asks\"\":[[\"\"11\"\",\"\"1\"\"]]}\"\n"
+        "101,1,spot,depth5,1,0,1,ETHUSDT,\"{\"\"lastUpdateId\"\":200,\"\"bids\"\":[[\"\"20\"\",\"\"2\"\"]],\"\"asks\"\":[[\"\"21\"\",\"\"2\"\"]]}\"\n"
+        "102,1,spot,depth_diff,0,0,2,BTCUSDT,\"{\"\"U\"\":101,\"\"u\"\":101,\"\"b\"\":[[\"\"10\"\",\"\"3\"\"]],\"\"a\"\":[]}\"\n"
+        "103,1,spot,depth_diff,1,0,2,ETHUSDT,\"{\"\"U\"\":201,\"\"u\"\":201,\"\"b\"\":[[\"\"20\"\",\"\"4\"\"]],\"\"a\"\":[]}\"\n"
+        "104,1,spot,depth5,0,1,1,BTCUSDT,\"{\"\"lastUpdateId\"\":300,\"\"bids\"\":[[\"\"30\"\",\"\"5\"\"]],\"\"asks\"\":[[\"\"31\"\",\"\"5\"\"]]}\"\n"
+        "105,1,spot,depth_diff,1,0,3,ETHUSDT,\"{\"\"U\"\":202,\"\"u\"\":202,\"\"b\"\":[[\"\"20\"\",\"\"5\"\"]],\"\"a\"\":[]}\"\n";
+    binance_capture::ReplayStats multi_stats;
+    const auto multi_output = runReplay(interleaved_input, &multi_stats);
+    assert(multi_stats.order_book_rows == 6);
+    std::istringstream multi_stream(multi_output);
+    std::vector<std::vector<std::string>> multi_rows;
+    while (std::getline(multi_stream, line)) multi_rows.push_back(csvFields(line));
+    assert(multi_rows.size() == 7);
+    for (size_t i = 1; i < multi_rows.size(); ++i) {
+        assert(multi_rows[i][2] == std::to_string(i));
+    }
+    assert(multi_rows[1][6] == "1000000000");
+    assert(multi_rows[2][6] == "2000000000");
+    assert(multi_rows[3][11] == "300000000");
+    assert(multi_rows[4][11] == "400000000");
+    assert(multi_rows[5][6] == "3000000000");
+    assert(multi_rows[6][11] == "500000000");
+
     expectReplayFailure("", "incorrect 9-column header");
     expectReplayFailure("wrong,header\n", "incorrect 9-column header");
     expectReplayFailure(
@@ -151,6 +183,11 @@ int main() {
         "1,1,spot,depth5,0,0,1,BTCUSDT," +
             binance_capture::csvEscape("{\"lastUpdateId\":1,\"bids\":[[\"bad\",\"1.0\"]],\"asks\":[]}") + "\n",
         "invalid integer part");
+    expectReplayFailure(
+        "recv_tsec,recv_tnsec,venue,stream_kind,shard_id,conn_epoch,conn_seq,symbol,payload_json\n"
+        "1,1,spot,trade,0,0,1,BTCUSDT,{}\n"
+        "2,1,spot,trade,1,0,2,ETHUSDT,{}\n",
+        "first conn_seq for shard must be 1");
 
     std::cout << "market_replay_tests passed\n";
     return 0;

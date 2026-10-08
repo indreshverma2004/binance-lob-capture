@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <charconv>
 #include <limits>
+#include <map>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -214,37 +216,53 @@ private:
     void validateMetadata(const NormalizedMarketEvent& event) {
         if (!metadata_initialized_) {
             venue_ = event.venue;
-            symbol_ = event.symbol;
-            shard_id_ = event.shard_id;
-            epoch_ = event.conn_epoch;
             if (event.conn_seq != 1) {
                 throw std::runtime_error("market_data.csv row " + std::to_string(record_number_) +
                                          ": first conn_seq must be 1");
             }
             metadata_initialized_ = true;
-            last_conn_seq_ = event.conn_seq;
+            shard_states_[event.shard_id] = {event.conn_epoch, event.conn_seq};
+            symbol_shards_[event.symbol] = event.shard_id;
             return;
         }
 
-        if (event.venue != venue_ || event.symbol != symbol_ || event.shard_id != shard_id_) {
+        if (event.venue != venue_) {
             throw std::runtime_error("market_data.csv row " + std::to_string(record_number_) +
-                                     ": replay supports one venue, symbol, and shard per file");
+                                     ": replay supports one venue per file");
         }
-        if (event.conn_epoch == epoch_) {
-            if (last_conn_seq_ == std::numeric_limits<uint64_t>::max() ||
-                event.conn_seq != last_conn_seq_ + 1) {
+        const auto symbol_shard = symbol_shards_.find(event.symbol);
+        if (symbol_shard != symbol_shards_.end() && symbol_shard->second != event.shard_id) {
+            throw std::runtime_error("market_data.csv row " + std::to_string(record_number_) +
+                                     ": symbol changed shard within file");
+        }
+        symbol_shards_[event.symbol] = event.shard_id;
+        auto shard = shard_states_.find(event.shard_id);
+        if (shard == shard_states_.end()) {
+            if (event.conn_seq != 1) {
+                throw std::runtime_error("market_data.csv row " + std::to_string(record_number_) +
+                                         ": first conn_seq for shard must be 1");
+            }
+            shard_states_[event.shard_id] = {event.conn_epoch, event.conn_seq};
+            return;
+        }
+        auto& state = shard->second;
+        if (event.conn_epoch == state.epoch) {
+            if (state.last_conn_seq == std::numeric_limits<uint64_t>::max() ||
+                event.conn_seq != state.last_conn_seq + 1) {
                 throw std::runtime_error("market_data.csv row " + std::to_string(record_number_) +
                                          ": conn_seq is not contiguous within conn_epoch");
             }
         } else {
-            if (event.conn_epoch < epoch_ || event.conn_seq != 1) {
+            if (event.conn_epoch < state.epoch || event.conn_seq != 1) {
                 throw std::runtime_error("market_data.csv row " + std::to_string(record_number_) +
                                          ": invalid conn_epoch/conn_seq transition");
             }
-            epoch_ = event.conn_epoch;
+            state.epoch = event.conn_epoch;
         }
-        last_conn_seq_ = event.conn_seq;
+        state.last_conn_seq = event.conn_seq;
     }
+
+    struct ShardState { int64_t epoch; uint64_t last_conn_seq; };
 
     std::istream& input_;
     size_t physical_line_ = 1;
@@ -252,10 +270,8 @@ private:
     size_t record_number_for_read_ = 0;
     bool metadata_initialized_ = false;
     std::string venue_;
-    std::string symbol_;
-    int64_t shard_id_ = 0;
-    int64_t epoch_ = 0;
-    uint64_t last_conn_seq_ = 0;
+    std::map<int64_t, ShardState> shard_states_;
+    std::map<std::string, int64_t> symbol_shards_;
 };
 
 std::vector<DepthLevel> parseDepthLevels(const nlohmann::json& payload,
@@ -536,8 +552,10 @@ ReplayStats replayMarketDataCsv(std::istream& input,
     MarketDataCsvReader reader(input);
     writeOrderBookCsvHeader(order_book_output);
     ReplayStats stats;
-    std::optional<OrderBookProcessor> processor;
-    int64_t previous_epoch = -1;
+    std::map<std::string, std::unique_ptr<OrderBookProcessor>> processors;
+    std::map<std::string, int64_t> processor_shards;
+    std::map<int64_t, int64_t> shard_epochs;
+    uint64_t output_seq_no = 0;
     NormalizedMarketEvent event;
 
     while (reader.next(event)) {
@@ -546,16 +564,25 @@ ReplayStats replayMarketDataCsv(std::istream& input,
         else if (event.stream_kind == "depth5") ++stats.depth5_events;
         else ++stats.trade_events;
 
-        if (!processor) {
-            processor.emplace(event.venue, event.symbol);
-        } else if (event.conn_epoch != previous_epoch) {
-            processor->reset();
+        auto epoch = shard_epochs.find(event.shard_id);
+        if (epoch == shard_epochs.end()) {
+            shard_epochs[event.shard_id] = event.conn_epoch;
+        } else if (event.conn_epoch != epoch->second) {
+            for (auto& entry : processors) {
+                if (entry.second && processor_shards.at(entry.first) == event.shard_id) entry.second->reset();
+            }
+            epoch->second = event.conn_epoch;
         }
-        previous_epoch = event.conn_epoch;
+        auto processor_it = processors.find(event.symbol);
+        if (processor_it == processors.end()) {
+            processor_it = processors.emplace(event.symbol,
+                std::make_unique<OrderBookProcessor>(event.venue, event.symbol)).first;
+            processor_shards[event.symbol] = event.shard_id;
+        }
 
         ProcessedMarketEvent result;
         try {
-            result = processor->process(event);
+            result = processor_it->second->process(event);
         } catch (const std::exception& exc) {
             throw std::runtime_error("market_data.csv row " + std::to_string(reader.rowNumber()) +
                                      ": " + exc.what());
@@ -576,7 +603,9 @@ ReplayStats replayMarketDataCsv(std::istream& input,
             case EventDisposition::trade: break;
         }
         if (result.order_book_row) {
-            writeOrderBookCsvRow(order_book_output, *result.order_book_row);
+            auto row = *result.order_book_row;
+            row.seqNo = ++output_seq_no;
+            writeOrderBookCsvRow(order_book_output, row);
             ++stats.order_book_rows;
         }
     }

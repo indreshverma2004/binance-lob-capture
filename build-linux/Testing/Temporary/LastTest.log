@@ -1,18 +1,18 @@
-Start testing: Oct 07 06:09 UTC
+Start testing: Oct 08 02:33 UTC
 ----------------------------------------------------------
 1/4 Testing: order_book_tests
 1/4 Test: order_book_tests
 Command: "/mnt/c/Users/HP/Desktop/assignment/build-linux/order_book_tests"
 Directory: /mnt/c/Users/HP/Desktop/assignment/build-linux
-"order_book_tests" start time: Oct 07 06:09 UTC
+"order_book_tests" start time: Oct 08 02:33 UTC
 Output:
 ----------------------------------------------------------
 order_book_tests passed
 <end of output>
-Test time =   0.02 sec
+Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"order_book_tests" end time: Oct 07 06:09 UTC
+"order_book_tests" end time: Oct 08 02:33 UTC
 "order_book_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -20,15 +20,15 @@ Test Passed.
 2/4 Test: market_replay_tests
 Command: "/mnt/c/Users/HP/Desktop/assignment/build-linux/market_replay_tests"
 Directory: /mnt/c/Users/HP/Desktop/assignment/build-linux
-"market_replay_tests" start time: Oct 07 06:09 UTC
+"market_replay_tests" start time: Oct 08 02:33 UTC
 Output:
 ----------------------------------------------------------
 market_replay_tests passed
 <end of output>
-Test time =   0.02 sec
+Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"market_replay_tests" end time: Oct 07 06:09 UTC
+"market_replay_tests" end time: Oct 08 02:33 UTC
 "market_replay_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -36,7 +36,7 @@ Test Passed.
 3/4 Test: resync_tests
 Command: "/mnt/c/Users/HP/Desktop/assignment/build-linux/resync_tests"
 Directory: /mnt/c/Users/HP/Desktop/assignment/build-linux
-"resync_tests" start time: Oct 07 06:09 UTC
+"resync_tests" start time: Oct 08 02:33 UTC
 Output:
 ----------------------------------------------------------
 resync_tests passed
@@ -44,7 +44,7 @@ resync_tests passed
 Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"resync_tests" end time: Oct 07 06:09 UTC
+"resync_tests" end time: Oct 08 02:33 UTC
 "resync_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -52,7 +52,7 @@ Test Passed.
 4/4 Test: metrics_tests
 Command: "/mnt/c/Users/HP/Desktop/assignment/build-linux/metrics_tests"
 Directory: /mnt/c/Users/HP/Desktop/assignment/build-linux
-"metrics_tests" start time: Oct 07 06:09 UTC
+"metrics_tests" start time: Oct 08 02:33 UTC
 Output:
 ----------------------------------------------------------
 metrics_tests passed
@@ -60,8 +60,8 @@ metrics_tests passed
 Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"metrics_tests" end time: Oct 07 06:09 UTC
+"metrics_tests" end time: Oct 08 02:33 UTC
 "metrics_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Oct 07 06:09 UTC
+End testing: Oct 08 02:33 UTC
