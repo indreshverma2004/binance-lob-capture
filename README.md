@@ -222,22 +222,18 @@ On 2026-10-08, three live captures ran for approximately two minutes each and wr
 | Spot BTCUSDT + ETHUSDT | 12,479 | 3,883 | 2,414 | 2 |
 | USD-M BTCUSDT | 4,865 | 1,509 | 1,194 | 1 |
 
-The USD-M pair is also copied under `output-usdm/` for a venue-specific submission folder. The paired filenames are `market_data_spot_BTCUSDT_2026-10-08.csv` and its `_orderbook.csv` companion, `market_data_spot_BTCUSDT-ETHUSDT_2026-10-08.csv` and its companion, and `market_data_usdm_BTCUSDT_2026-10-08.csv` and its companion. The existing generic `market_data.csv` and `order_book.csv` in `output/` were left intact. All six new files were checked for exact headers and column counts, per-shard connection-sequence continuity, and monotonically increasing order-book `seqNo`.
+The USD-M pair is also copied under `output-usdm/` as a separate venue folder. The paired filenames are `market_data_spot_BTCUSDT_2026-10-08.csv` and its `_orderbook.csv` companion, `market_data_spot_BTCUSDT-ETHUSDT_2026-10-08.csv` and its companion, and `market_data_usdm_BTCUSDT_2026-10-08.csv` and its companion. The existing generic `market_data.csv` and `order_book.csv` in `output/` were left intact. All six new files were checked for exact headers and column counts, per-shard connection-sequence continuity, and monotonically increasing order-book `seqNo`.
+
+CSV header and width check for the Spot BTCUSDT pair:
+
+```bash
+head -2 ./output/market_data_spot_BTCUSDT_2026-10-08.csv
+head -2 ./output/market_data_spot_BTCUSDT_2026-10-08_orderbook.csv
+awk -F',' 'NR==2{print NF}' ./output/market_data_spot_BTCUSDT_2026-10-08_orderbook.csv
+```
+
+Expected: a nine-column market-data header and a 26-column order-book row (`awk` prints `26`). Actual: the market-data file has the expected nine columns and 4,995 data rows; the order-book file has the expected 26-column header and all 1,612 data rows have 26 columns. The check matches.
 
 Spot capture: `output-linux-90s/` contains the latest paired BTCUSDT run made with a 90-second limit. Its event timestamps span 84.245585 seconds; three receive timestamps moved backward by approximately 1.4–1.6 seconds, while `conn_seq` remained ordered. It recorded 3,980 market rows: 2,288 trades, 846 depth5 events, and 846 depth diffs; 846 order-book rows were replay-checked. All three stream types arrived, CSV/JSON schemas validated, and every order-book row matched its depth5 source snapshot. All 846 diffs were stale against the latest snapshot baseline, so this capture did not demonstrate applied Spot diffs or deletions. No gaps or reconnects occurred.
 
 Earlier USD-M live validation recorded approximately 24 seconds of BTCUSDT data: 980 market rows (238 depth diffs, 231 depth5 events, 511 trades), 466 replay-matched order-book rows, 235 applied diffs, 3 stale diffs, 0 gaps, 1,750 zero-quantity updates, and 5 modeled-level removals. No reconnect occurred. These figures are prior live-validation results, not a replay run from the current workspace.
-
-## GitHub Submission
-
-Do not push until the destination remote has been checked. This workspace currently has an existing `origin` pointing to a repository unrelated to this assignment; no remote has been changed and no push has been made. Create a dedicated submission repository and use a separately named remote until the destination is confirmed:
-
-```bash
-git remote -v
-git remote add submission https://github.com/<your-username>/binance-lob-capture.git
-git push -u submission main
-git tag -a v1.0.0 -m "Submission v1.0.0"
-git push submission v1.0.0
-```
-
-The project `.gitignore` excludes build outputs, generated capture/benchmark directories, compiled artifacts, logs, and local secret configuration. `output/` and `output-usdm/` are the selected output directories to include. `output-usdm/` contains a copy of the current two-minute USD-M BTCUSDT CSV pair. Other local folders such as `output-linux-90s/`, `output-benchmark-metrics/`, `output-replay-metrics/`, and `output-linux/` remain excluded. Ignore rules do not remove files already tracked by Git, so check `git status` and `git ls-files` before staging. Never submit credentials, API keys, or private keys.
