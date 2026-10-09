@@ -13,9 +13,9 @@ On Ubuntu/WSL, install dependencies and build/test:
 ```bash
 sudo apt-get update
 sudo apt-get install -y cmake ninja-build g++ libssl-dev libboost-all-dev nlohmann-json3-dev
-cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build-linux --parallel
-ctest --test-dir build-linux --output-on-failure
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
 ## Supported Venues and Streams
@@ -136,7 +136,7 @@ Timestamps use local `std::chrono::system_clock` wall time sampled immediately a
 Replay mode is an optional local-review feature for regenerating order-book rows from a captured market-data CSV without contacting Binance. It shares the same normalized event processor, order-book logic, fixed-point parser, and sequence handling used by live capture.
 
 ```bash
-./build-linux/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./replay-output
+./build/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./replay-output
 ```
 
 The input must use the exact 9-column market-data header and contain one venue. Multiple symbols and shards may be interleaved. Each symbol must remain assigned to the same shard throughout the file; each shard has independently contiguous `conn_seq` values within increasing `conn_epoch` values. RFC4180 quoting is parsed and unescaped before `payload_json` is parsed. Invalid headers, CSV fields, JSON, timestamps, sequence metadata, stream kinds, and depth numerics fail with the input row number where available.
@@ -180,14 +180,14 @@ Live capture prints a metrics summary at normal shutdown. It reports elapsed mon
 Replay can report processing performance with the optional `--benchmark` flag:
 
 ```bash
-./build-linux/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./benchmark-output --benchmark
+./build/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./benchmark-output --benchmark
 ```
 
 Benchmark mode uses the normal replay pipeline, writes the regular `order_book.csv`, and reports event/row counts, elapsed processing time, events per second, and rows per second. For the same input, it produces the same deterministic replay output; benchmark timing does not affect processing. Throughput depends on the machine, build, and filesystem; the measured time includes replay processing and flushing the output file.
 
 ## Validation
 
-The validated Linux/WSL toolchain is GCC 13.3.0 and CMake 3.28.3. A prior clean Release build completed with `-Wall -Wextra`. On 2026-10-07, `cmake --build build-linux --parallel` completed after adding metrics, and `ctest --test-dir build-linux --output-on-failure` passed 4/4. Earlier direct runs of the original test executables also passed.
+The validated Linux/WSL toolchain is GCC 13.3.0 and CMake 3.28.3. A prior clean Release build completed with `-Wall -Wextra`. On 2026-10-07, `cmake --build build --parallel` completed after adding metrics, and `ctest --test-dir build --output-on-failure` passed 4/4. Earlier direct runs of the original test executables also passed.
 
 Latest reported benchmark, using the local `output-linux-90s/market_data.csv` validation capture:
 

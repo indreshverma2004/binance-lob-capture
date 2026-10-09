@@ -35,7 +35,7 @@ Mandatory implementation stable; optional replay, REST snapshot resynchronizatio
 
 - Assignment PDF, current source tree, CMake, tests, README, project status, git state, and generated Spot/USD-M CSVs reviewed.
 - Linux/WSL Release build using GCC 13.3.0 (`/usr/bin/c++`) and CMake 3.28.3; clean build completed with `-Wall -Wextra` and no compiler warnings reported.
-- Metrics feature verification (2026-10-07, WSL): `cmake --build build-linux --parallel` completed successfully; CTest passed 4/4 (`order_book_tests`, `market_replay_tests`, `resync_tests`, `metrics_tests`).
+- Metrics feature verification (2026-10-07, WSL): `cmake --build build --parallel` completed successfully; CTest passed 4/4 (`order_book_tests`, `market_replay_tests`, `resync_tests`, `metrics_tests`).
 - Replay benchmark as reported by the user: 3,980 events, 846 order-book rows, 0.26 seconds, 15,459.61 events/sec, 3,286.14 rows/sec. Timing is machine/build/filesystem dependent.
 - A final clean Release rebuild completed after adding the asynchronous REST client; no compiler warnings were reported.
 - The current Spot sample and earlier USD-M capture were parsed with strict CSV/JSON readers and independently replayed for order-book consistency. Multi-symbol/shard replay behavior is covered with deterministic interleaved fixtures. The USD-M CSV files are no longer present in the workspace. Headers/widths, compact inner payloads, CSV quoting, timestamps, ordering, and state equality were checked while available.
@@ -84,9 +84,9 @@ Mandatory implementation stable; optional replay, REST snapshot resynchronizatio
 Known-good Linux/WSL commands:
 
 ```bash
-cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build-linux --parallel
-ctest --test-dir build-linux --output-on-failure
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
 Toolchain: GCC 13.3.0, CMake 3.28.3, C++17. Dependencies: Boost.Asio/Beast, Boost.System, Boost.Thread, OpenSSL, and nlohmann/json.
@@ -101,7 +101,7 @@ Toolchain: GCC 13.3.0, CMake 3.28.3, C++17. Dependencies: Boost.Asio/Beast, Boos
 
 - Live shutdown reports monotonic runtime, event counts by stream, emitted rows, applied/stale diffs, zero-quantity updates observed in depth-diff messages, reconnects, successful REST resynchronizations, REST snapshot failures, and event throughput.
 - `--benchmark` is available with `--replay`; it runs the existing replay processor, writes the standard `order_book.csv`, and reports elapsed time, events/sec, and rows/sec.
-- Benchmark command: `./build-linux/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./benchmark-output --benchmark`.
+- Benchmark command: `./build/binance_capture --replay ./output/market_data_spot_BTCUSDT_2026-10-08.csv --output-dir ./benchmark-output --benchmark`.
 - Invalid events abort replay/capture and are not included in the normal completion summary; no rejected-event counter is reported.
 - Latest reported run: 3,980 events and 846 rows in 0.26 seconds (15,459.61 events/sec; 3,286.14 rows/sec). These values are environment-specific.
 
@@ -113,7 +113,7 @@ Toolchain: GCC 13.3.0, CMake 3.28.3, C++17. Dependencies: Boost.Asio/Beast, Boos
 
 ## Current Git Status
 
-No commit was made. The current worktree includes multi-symbol, duration, and date-stamped output changes in `README.md`, `PROJECT_STATUS.md`, `include/sharding.hpp`, `src/main.cpp`, `src/market_replay.cpp`, and `tests/test_replay.cpp`. Three date-stamped live capture pairs were created in `output/`; the USD-M pair was also copied into `output-usdm/` for GitHub inclusion. The prior generic output files were preserved. The Linux build updated tracked generated files under `build-linux/`. Other pre-existing worktree changes remain; review `git status --short` before staging. The branch is `main`, tracking `origin/main`; `origin` points to `https://github.com/indreshverma2004/ordertracker.git`, which appears unrelated to this assignment. Do not push this assignment to that remote.
+No commit was made. The current worktree includes multi-symbol, duration, and date-stamped output changes in `README.md`, `PROJECT_STATUS.md`, `include/sharding.hpp`, `src/main.cpp`, `src/market_replay.cpp`, and `tests/test_replay.cpp`. Three date-stamped live capture pairs were created in `output/`; the USD-M pair was also copied into `output-usdm/` for GitHub inclusion. The prior generic output files were preserved. The Linux build updated tracked generated files under `build/`. Other pre-existing worktree changes remain; review `git status --short` before staging. The branch is `main`, tracking `origin/main`; `origin` points to `https://github.com/indreshverma2004/ordertracker.git`, which appears unrelated to this assignment. Do not push this assignment to that remote.
 
 ## Optional Features Completed
 
