@@ -128,11 +128,6 @@ Timestamps use local `std::chrono::system_clock` wall time sampled immediately a
 - A live sequence gap marks the REST-backed book out of sync, starts REST resynchronization, and buffers diffs until a complete bridge validates. Replay mode has no REST access and waits for a recorded depth5 baseline after a gap.
 - On a live connection failure, the local book and sequence baseline are reset and REST resynchronization begins after reconnection; `conn_epoch` increments and `conn_seq` restarts at 1. The reconnect delay is two seconds.
 
-## I/O, Shutdown, and Limitations
-
-Each shard has one blocking WebSocket reader/writer thread and independent per-symbol order-book processors. REST DNS/TCP/TLS/HTTP requests run asynchronously so that shard readers can continue buffering depth messages. A mutex serializes writes and flushes to the two shared CSV files; order-book `seqNo` is assigned globally while holding the output lock. Disk latency can therefore block shard processing. SIGINT/SIGTERM set a shared stop flag; after a blocking read returns, each worker attempts a normal WebSocket close, then the main thread joins workers and closes the files. RAII owns WebSocket, TLS, sockets, I/O contexts, and REST futures.
-
-The live local book uses a REST snapshot capped at 1,000 levels per side; it is not a complete exchange book. The current shard size is a conservative application setting of 10 symbols per WebSocket connection. Deterministic tests exercise gap/reconnect recovery, but a gap or reconnect was not naturally triggered in the final live captures.
 
 ## Optional / Stretch Features
 
