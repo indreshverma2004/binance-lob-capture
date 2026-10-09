@@ -4,6 +4,8 @@
 !/output/
 /output-linux/
 /output-*/
+!/output-linux-90s/
+!/output-linux-90s/**
 !/output-usdm/
 !/output-usdm/**
 /ssl_test.cpp
